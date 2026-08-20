@@ -108,6 +108,17 @@ const restoreFlat = await post('/trash-restore', { id: flatEntry?.id ?? '' })
 const flatBack = await get('/skills')
 check('flat-file restore', restoreFlat.status === 200 && flatBack.body.groups[0].skills.some(s => s.name === 'flat-skill' && s.kind === 'file'))
 
+// 10c. Vendored dependency trees (deep paths) install fine.
+const deep = await post('/upload', {
+  targetRoot: 'user-dsh', conflict: 'skip',
+  files: [
+    { path: 'xhs-downloader/SKILL.md', contentBase64: Buffer.from('---\nname: vendored-skill\ndescription: deep\n---\nbody\n').toString('base64') },
+    { path: 'xhs-downloader/libs/beartype/_util/hint/pep/proposal/pep484/pep484generic.py', contentBase64: Buffer.from('# vendored').toString('base64') },
+  ],
+})
+check('vendored deep-path upload', deep.status === 200 && deep.body.outcome?.status === 'imported', JSON.stringify(deep.body))
+await post('/delete', { rootId: 'user-dsh', name: 'vendored-skill' })
+
 // 11. Path traversal on upload is rejected.
 const evil = await post('/upload', {
   targetRoot: 'user-dsh', conflict: 'skip',

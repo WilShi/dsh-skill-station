@@ -106,7 +106,9 @@ export function assertContained(root: SkillRoot, target: string): string {
 
 /**
  * Validate a relative upload path: no absolute paths, no `..` segments, no
- * backslashes, bounded depth.
+ * backslashes. Depth is intentionally unbounded — real skills vendor
+ * dependency trees; containment is enforced separately by assertContained,
+ * and the filesystem's own ENAMETOOLONG bounds pathological lengths.
  * @param rel - client-supplied relative path inside a skill folder.
  * @returns the normalized relative path.
  * @throws when the path is unsafe.
@@ -116,7 +118,6 @@ export function assertSafeRelative(rel: string): string {
     throw new Error(`unsafe relative path: ${JSON.stringify(rel)}`)
   }
   const segments = rel.split('/')
-  if (segments.length > 16) throw new Error(`path too deep: ${rel}`)
   for (const segment of segments) {
     if (segment === '' || segment === '.' || segment === '..') {
       throw new Error(`unsafe path segment in: ${rel}`)

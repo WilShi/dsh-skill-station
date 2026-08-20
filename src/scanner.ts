@@ -130,14 +130,15 @@ async function scanOneDir(
 const SIZE_CAP_BYTES = 512 * 1024 * 1024
 
 /**
- * Total size of regular files under a directory, symlink- and depth-safe.
+ * Total size of regular files under a directory; symlinks are skipped and
+ * the accumulated byte count is capped, so vendored trees stay bounded.
  * @param dir - directory to measure.
  * @returns accumulated byte count, capped to keep scans bounded.
  */
 export async function dirSize(dir: string): Promise<number> {
   let total = 0
-  const walk = async (current: string, depth: number): Promise<void> => {
-    if (depth > 8 || total >= SIZE_CAP_BYTES) return
+  const walk = async (current: string): Promise<void> => {
+    if (total >= SIZE_CAP_BYTES) return
     let entries
     try {
       entries = await readdir(current, { withFileTypes: true })
@@ -149,13 +150,13 @@ export async function dirSize(dir: string): Promise<number> {
       const path = join(current, entry.name)
       if (entry.isSymbolicLink()) continue
       if (entry.isDirectory()) {
-        await walk(path, depth + 1)
+        await walk(path)
       } else if (entry.isFile()) {
         const stat = await lstat(path).catch(() => null)
         if (stat !== null) total += stat.size
       }
     }
   }
-  await walk(dir, 0)
+  await walk(dir)
   return total
 }

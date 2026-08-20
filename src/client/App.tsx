@@ -457,8 +457,8 @@ function TrashTab(): JSX.Element {
  * @returns relative path plus File for every dropped file. */
 async function collectEntries(entries: unknown[]): Promise<{ path: string; file: File }[]> {
   const out: { path: string; file: File }[] = []
-  const walk = async (entry: unknown, prefix: string, depth: number): Promise<void> => {
-    if (depth > 16 || out.length > 2000) return
+  const walk = async (entry: unknown, prefix: string): Promise<void> => {
+    if (out.length >= 10000) throw new Error('文件夹里的文件超过 10000 个，暂不支持整体安装')
     const node = entry as { isFile?: boolean; isDirectory?: boolean; name: string; file?: (ok: (f: File) => void, err: (e: unknown) => void) => void; createReader?: () => { readEntries: (ok: (batch: unknown[]) => void, err: (e: unknown) => void) => void } }
     if (node.isFile === true) {
       const file = await new Promise<File>((resolve, reject) => {
@@ -471,11 +471,11 @@ async function collectEntries(entries: unknown[]): Promise<{ path: string; file:
       for (;;) {
         const batch = await new Promise<unknown[]>((resolve, reject) => reader.readEntries(resolve, reject))
         if (batch.length === 0) break
-        for (const child of batch) await walk(child, `${prefix}${node.name}/`, depth + 1)
+        for (const child of batch) await walk(child, `${prefix}${node.name}/`)
       }
     }
   }
-  for (const entry of entries) await walk(entry, '', 0)
+  for (const entry of entries) await walk(entry, '')
   return out
 }
 

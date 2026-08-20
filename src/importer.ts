@@ -200,8 +200,7 @@ export function stripCommonPrefix(files: readonly UploadFile[]): UploadFile[] {
 export async function copyTree(source: string, target: string): Promise<void> {
   await mkdir(target, { recursive: true })
   let total = 0
-  const walk = async (from: string, to: string, depth: number): Promise<void> => {
-    if (depth > 16) throw new Error('skill folder too deep')
+  const walk = async (from: string, to: string): Promise<void> => {
     const entries = await readdir(from, { withFileTypes: true })
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue
@@ -209,7 +208,7 @@ export async function copyTree(source: string, target: string): Promise<void> {
       const toPath = join(to, entry.name)
       if (entry.isDirectory()) {
         await mkdir(toPath, { recursive: true })
-        await walk(fromPath, toPath, depth + 1)
+        await walk(fromPath, toPath)
       } else if (entry.isFile()) {
         const stat = await lstat(fromPath)
         if (stat.size > MAX_FILE_BYTES) throw new Error(`file too large: ${entry.name}`)
@@ -219,7 +218,7 @@ export async function copyTree(source: string, target: string): Promise<void> {
       }
     }
   }
-  await walk(source, target, 0)
+  await walk(source, target)
 }
 
 /**
