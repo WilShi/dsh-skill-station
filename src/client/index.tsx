@@ -66,7 +66,12 @@ function StationFooterButton(props: { wide?: boolean }): JSX.Element {
 
   return (
     <>
-      <button className="ss_footBtn" type="button" onClick={() => setOpen(value => !value)} title="技能站">
+      <button
+        className={props.wide === false ? 'ss_footBtn ss_footBtnRail' : 'ss_footBtn'}
+        type="button"
+        onClick={() => setOpen(value => !value)}
+        title="技能站"
+      >
         <StationIcon />
         {props.wide === false ? null : <span>技能站</span>}
       </button>
