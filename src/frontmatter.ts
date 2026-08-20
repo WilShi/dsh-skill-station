@@ -54,13 +54,16 @@ export function splitFrontmatter(text: string): FrontmatterSplit | null {
 }
 
 /**
- * Read invocation metadata from one skill file's frontmatter.
+ * Read invocation metadata from one skill file's frontmatter. Strict YAML
+ * first; when the header is not valid YAML (real-world skills carry
+ * unquoted colons in descriptions), flat top-level scalars are salvaged
+ * line-wise so name/description still resolve.
  * @param text - complete SKILL.md content.
- * @returns parsed metadata, or null when the file has no parseable frontmatter.
+ * @returns parsed metadata, or null when no frontmatter block exists.
  */
 export function readSkillMeta(text: string): SkillMeta | null {
   const split = splitFrontmatter(text)
-  if (split === null) return null
+  if (split === null) return salvageMeta(text)
   const { data } = split
   const disableModel = data['disable-model-invocation']
   const userInvocable = data['user-invocable']
@@ -70,6 +73,92 @@ export function readSkillMeta(text: string): SkillMeta | null {
     modelInvocable: disableModel !== true,
     userInvocable: userInvocable !== false,
   }
+}
+
+/** Line-wise fallback for frontmatter that is not strict YAML. */
+function salvageMeta(text: string): SkillMeta | null {
+  const lines = text.split('\n')
+  if (lines[0]?.trim() !== DELIMITER) return null
+  let close = -1
+  for (let i = 1; i < lines.length; i += 1) {
+    if (lines[i]?.trim() === DELIMITER) {
+      close = i
+      break
+    }
+  }
+  if (close === -1) return null
+  let name: string | undefined
+  let description: string | undefined
+  let disableModel = false
+  let userInvocable = true
+  for (const line of lines.slice(1, close)) {
+    const match = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/.exec(line)
+    if (match === null) continue
+    const value = unquote(match[2] ?? '')
+    switch (match[1]) {
+      case 'name': name = value; break
+      case 'description': description = value; break
+      case 'disable-model-invocation': disableModel = value === 'true'; break
+      case 'user-invocable': userInvocable = value !== 'false'; break
+      default: break
+    }
+  }
+  if (name === undefined && description === undefined) return null
+  return {
+    ...(name !== undefined && name !== '' ? { name } : {}),
+    ...(description !== undefined && description !== '' ? { description } : {}),
+    modelInvocable: !disableModel,
+    userInvocable,
+  }
+}
+
+/** Strip one matching pair of surrounding quotes from a scalar. */
+function unquote(value: string): string {
+  const trimmed = value.trim()
+  const first = trimmed[0]
+  if ((first === '"' || first === "'") && trimmed.length >= 2 && trimmed.endsWith(first)) {
+    return trimmed.slice(1, -1)
+  }
+  return trimmed
+}
+
+/**
+ * Repair a SKILL.md whose frontmatter is not strict YAML by double-quoting
+ * each offending top-level scalar (guided by the parser's error position),
+ * so strict consumers — the DSH skill loader — accept the installed copy.
+ * @param text - complete SKILL.md content.
+ * @returns the repaired file, or null when the frontmatter is already valid
+ * or cannot be repaired line-wise.
+ */
+export function repairFrontmatter(text: string): string | null {
+  if (splitFrontmatter(text) !== null) return null
+  const lines = text.split('\n')
+  if (lines[0]?.trim() !== DELIMITER) return null
+  let close = -1
+  for (let i = 1; i < lines.length; i += 1) {
+    if (lines[i]?.trim() === DELIMITER) {
+      close = i
+      break
+    }
+  }
+  if (close === -1) return null
+  const header = lines.slice(1, close)
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      parseYaml(header.join('\n'))
+      return [lines[0] ?? DELIMITER, ...header, ...lines.slice(close)].join('\n')
+    } catch (error) {
+      const line = (error as { linePos?: [{ line?: unknown }] }).linePos?.[0]?.line
+      if (typeof line !== 'number' || line < 1 || line > header.length) return null
+      const index = line - 1
+      const match = /^(\s*[A-Za-z][\w-]*\s*:)\s*(\S.*)$/.exec(header[index] ?? '')
+      if (match === null) return null
+      const value = match[2] ?? ''
+      if (value.startsWith('"') || value.startsWith("'")) return null
+      header[index] = `${match[1]} ${JSON.stringify(value)}`
+    }
+  }
+  return null
 }
 
 /**

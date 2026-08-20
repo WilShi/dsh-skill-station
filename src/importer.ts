@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto'
 import { copyFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { readSkillMeta, setName } from './frontmatter.js'
+import { readSkillMeta, repairFrontmatter, setName } from './frontmatter.js'
 import { assertContained, ensureRoot, enumerateRoot, type SkillRoot } from './roots.js'
 
 /** How an import resolves a name already present in the target root. */
@@ -110,7 +110,11 @@ async function importOne(
       await copyTree(item.sourcePath, staging)
       // Verify the copy carries a readable SKILL.md before declaring success.
       const copiedSkill = join(staging, 'SKILL.md')
-      await readFile(copiedSkill, 'utf8')
+      const copiedText = await readFile(copiedSkill, 'utf8')
+      // Repair sloppy real-world frontmatter (e.g. unquoted colons in the
+      // description) so the strict host loader registers the installed copy.
+      const repaired = repairFrontmatter(copiedText)
+      if (repaired !== null) await writeFile(copiedSkill, repaired, 'utf8')
       if (status === 'renamed') {
         // The folder rename alone leaves a duplicate frontmatter name that
         // shadows the original in the host registry; rewrite it to match.
@@ -158,6 +162,8 @@ export async function installUpload(
     }
     const text = Buffer.from(skillEntry.contentBase64, 'base64').toString('utf8')
     const meta = readSkillMeta(text)
+    // Repair sloppy frontmatter so the strict host loader registers the copy.
+    const repaired = repairFrontmatter(text)
     const name = meta?.name ?? ''
     if (!isSkillName(name)) throw new Error(`SKILL.md frontmatter needs a valid kebab-case name, got "${name}"`)
     if (meta?.description === undefined || meta.description === '') {
@@ -176,8 +182,13 @@ export async function installUpload(
     // Stage inside the root and rename into place, so a failed write
     // leaves no partial skill behind.
     const staging = assertContained(root, join(root.path, `.staging-${randomUUID()}`))
+    const toWrite = repaired === null
+      ? stripped
+      : stripped.map(file => file.path === 'SKILL.md'
+        ? { ...file, contentBase64: Buffer.from(repaired, 'utf8').toString('base64') }
+        : file)
     try {
-      for (const file of stripped) {
+      for (const file of toWrite) {
         const target = assertContained(root, join(staging, file.path))
         await mkdir(dirname(target), { recursive: true })
         const buffer = Buffer.from(file.contentBase64, 'base64')

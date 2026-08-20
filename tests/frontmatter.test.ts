@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readSkillMeta, setFlag, splitFrontmatter } from '../src/frontmatter.ts'
+import { readSkillMeta, repairFrontmatter, setFlag, splitFrontmatter } from '../src/frontmatter.ts'
 
 describe('splitFrontmatter', () => {
   it('splits a standard frontmatter block', () => {
@@ -31,6 +31,40 @@ describe('readSkillMeta', () => {
     const meta = readSkillMeta('---\nname: a\ndescription: b\ndisable-model-invocation: true\nuser-invocable: false\n---\n')
     expect(meta?.modelInvocable).toBe(false)
     expect(meta?.userInvocable).toBe(false)
+  })
+
+  it('salvages flat scalars when a description carries an unquoted colon', () => {
+    // Real-world shape (openclaw knowledge-studio): strict YAML rejects the
+    // second colon; the skill is fine in lenient consumers.
+    const text = '---\nname: knowledge-studio\nversion: 1.0.0\ndescription: 消化文档。Also triggers on keywords: 知识消化, 闪卡\n---\nbody\n'
+    const meta = readSkillMeta(text)
+    expect(meta?.name).toBe('knowledge-studio')
+    expect(meta?.description).toContain('知识消化')
+    expect(meta?.modelInvocable).toBe(true)
+  })
+
+  it('returns null when there is no frontmatter block at all', () => {
+    expect(readSkillMeta('# just markdown\n')).toBeNull()
+  })
+})
+
+describe('repairFrontmatter', () => {
+  it('returns null for already-valid frontmatter', () => {
+    expect(repairFrontmatter('---\nname: a\ndescription: b\n---\nbody\n')).toBeNull()
+  })
+
+  it('returns null when there is no frontmatter block', () => {
+    expect(repairFrontmatter('# just markdown\n')).toBeNull()
+  })
+
+  it('quotes the offending scalar so strict YAML accepts the file', () => {
+    const text = '---\nname: knowledge-studio\ndescription: 消化文档。Also triggers on keywords: 知识消化, 闪卡\n---\n# body\n'
+    const repaired = repairFrontmatter(text)
+    expect(repaired).not.toBeNull()
+    const split = splitFrontmatter(repaired ?? '')
+    expect(split?.data['name']).toBe('knowledge-studio')
+    expect(split?.data['description']).toContain('知识消化')
+    expect(repaired?.endsWith('# body\n')).toBe(true)
   })
 })
 

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { copyTree, freshName, importItems, installUpload, isSkillName, stripCommonPrefix } from '../src/importer.ts'
+import { readSkillMeta, splitFrontmatter } from '../src/frontmatter.ts'
 import { enumerateRoot, writableRoots, type SkillRoot } from '../src/roots.ts'
 
 let dir: string
@@ -165,6 +166,23 @@ describe('install atomicity', () => {
     expect(outcome.status).toBe('skipped')
     const residue = await readdir(root.path).catch(() => [] as string[])
     expect(residue).toEqual([])
+  })
+})
+
+describe('installUpload sloppy frontmatter', () => {
+  it('repairs an unquoted-colon description so the strict host loader accepts the copy', async () => {
+    const root = makeRoot(join(dir, 'target'))
+    const sloppy = '---\nname: sloppy-skill\ndescription: 消化文档。keywords: 知识消化, 闪卡\n---\nbody\n'
+    const outcome = await installUpload(root, [
+      { path: 'sloppy/SKILL.md', contentBase64: Buffer.from(sloppy).toString('base64') },
+    ], 'skip', async () => {})
+    expect(outcome.status).toBe('imported')
+    const installed = await readFile(join(root.path, 'sloppy-skill', 'SKILL.md'), 'utf8')
+    const meta = readSkillMeta(installed)
+    expect(meta?.name).toBe('sloppy-skill')
+    expect(meta?.description).toContain('知识消化')
+    // splitFrontmatter(严格 YAML)必须能解析安装后的拷贝 — 这正是宿主加载器的入口。
+    expect(splitFrontmatter(installed)?.data['description']).toContain('知识消化')
   })
 })
 
