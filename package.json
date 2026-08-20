@@ -1,0 +1,73 @@
+{
+  "name": "dsh-skill-station",
+  "version": "0.1.0",
+  "description": "Skill station for DeepSeek Harness: a sidebar hub that scans Claude/Codex/Cursor/Gemini skill libraries, imports skills with one click, manages global and project skills, and installs skill folders by drag-and-drop. · DSH 技能站：侧边栏技能中枢，扫描各家 agent 技能库一键导入，管理全局与项目技能，拖拽文件夹即装。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "client/client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
+    "test": "vitest run",
+    "prepack": "npm run build && npm run test"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "skills",
+    "skill-manager",
+    "agent-skills",
+    "claude",
+    "codex",
+    "cursor",
+    "gemini"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WilShi/dsh-skill-station.git"
+  },
+  "homepage": "https://github.com/WilShi/dsh-skill-station#readme",
+  "bugs": {
+    "url": "https://github.com/WilShi/dsh-skill-station/issues"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "yaml": "^2.6.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.14",
+    "esbuild": "^0.24.2",
+    "react": "^18.3.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,6 @@
+# dsh bundle patch: activates dsh-skill-station in any profile that installs
+# this package (via `dsh plugin --profile <name> add dsh-skill-station`).
+# The user's own cordis.patch.yml may override or disable this row by id.
+- insert:
+    - id: dsh-skill-station
+      name: 'dsh-skill-station'

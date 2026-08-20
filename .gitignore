@@ -1,0 +1,6 @@
+node_modules/
+/lib/
+/client/
+*.tsbuildinfo
+.DS_Store
+.tmp/
