@@ -5,7 +5,7 @@
  */
 
 import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { removePath } from './importer.js'
 import { dshHome } from './roots.js'
 
@@ -15,6 +15,12 @@ export interface TrashManifest {
   readonly rootId: string
   readonly from: string
   readonly deletedAt: string
+  /**
+   * Basename of the payload inside the entry directory. Present on entries
+   * written by this version; absent on legacy entries whose directory IS the
+   * payload (restore handles both).
+   */
+  readonly payload?: string
 }
 
 /** One trash entry with its manifest. */
@@ -42,7 +48,8 @@ export async function trashDir(): Promise<string> {
 }
 
 /**
- * Move one installed skill into the trash.
+ * Move one installed skill into the trash. The entry is always a directory
+ * wrapping the payload, so flat-file skills trash exactly like bundles.
  * @param path - absolute skill path (directory bundle or flat file).
  * @param name - skill name for the manifest.
  * @param rootId - root the skill was removed from.
@@ -53,8 +60,10 @@ export async function moveToTrash(path: string, name: string, rootId: string): P
   const stamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-')
   const id = `${stamp}-${name}`
   const dest = join(base, id)
-  await rename(path, dest)
-  const manifest: TrashManifest = { name, rootId, from: path, deletedAt: new Date().toISOString() }
+  await mkdir(dest, { recursive: true })
+  const payload = basename(path)
+  await rename(path, join(dest, payload))
+  const manifest: TrashManifest = { name, rootId, from: path, deletedAt: new Date().toISOString(), payload }
   await writeFile(join(dest, '.station-trash.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
   return id
 }
@@ -111,7 +120,14 @@ export async function restoreTrash(id: string): Promise<string | null> {
     return 'trash entry is corrupted'
   }
   try {
-    await rename(entryDir, manifest.from)
+    if (manifest.payload !== undefined) {
+      // Current layout: the entry directory wraps the payload.
+      await rename(join(entryDir, manifest.payload), manifest.from)
+      await removePath(entryDir)
+    } else {
+      // Legacy layout: the entry directory IS the (directory) payload.
+      await rename(entryDir, manifest.from)
+    }
   } catch (error) {
     // Put the manifest back; the entry stays restorable.
     await rename(join(entryDir, `.manifest-${id}`), join(entryDir, '.station-trash.json')).catch(() => {})

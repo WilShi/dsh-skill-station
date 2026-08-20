@@ -72,6 +72,36 @@ export function readSkillMeta(text: string): SkillMeta | null {
   }
 }
 
+/**
+ * Rewrite the frontmatter `name` field, preserving all other content. The
+ * existing line is replaced in place; a missing name is inserted before the
+ * closing delimiter. Files without frontmatter are returned unchanged.
+ * @param text - complete SKILL.md content.
+ * @param name - replacement kebab-case skill name.
+ * @returns the rewritten file content.
+ */
+export function setName(text: string, name: string): string {
+  const lines = text.split('\n')
+  if (lines[0]?.trim() !== DELIMITER) return text
+  let close = -1
+  for (let i = 1; i < lines.length; i += 1) {
+    if (lines[i]?.trim() === DELIMITER) {
+      close = i
+      break
+    }
+  }
+  if (close === -1) return text
+  const pattern = /^\s*name\s*:/
+  for (let i = 1; i < close; i += 1) {
+    if (pattern.test(lines[i] ?? '')) {
+      lines[i] = `name: ${name}`
+      return lines.join('\n')
+    }
+  }
+  lines.splice(close, 0, `name: ${name}`)
+  return lines.join('\n')
+}
+
 const FLAG_KEYS = ['disable-model-invocation', 'user-invocable'] as const
 
 /** One invocation flag the toggle route may rewrite. */

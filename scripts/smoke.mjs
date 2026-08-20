@@ -98,6 +98,16 @@ const restore = await post('/trash-restore', { id: trash.body.entries[0].id })
 const afterRestore = await get('/skills')
 check('POST /trash-restore', restore.status === 200 && afterRestore.body.groups[0].skills.some(s => s.name === 'dropped-skill'))
 
+// 10b. Flat-file skills trash and restore like bundles.
+await writeFile(join(process.env.DSH_HOME, 'skills', 'flat-skill.md'), '---\nname: flat-skill\ndescription: flat\n---\nflat\n')
+const delFlat = await post('/delete', { rootId: 'user-dsh', name: 'flat-skill' })
+const trashFlat = await get('/trash')
+const flatEntry = (trashFlat.body.entries ?? []).find(e => e.manifest.name === 'flat-skill')
+check('flat-file delete → trash', delFlat.status === 200 && flatEntry !== undefined, JSON.stringify(delFlat.body))
+const restoreFlat = await post('/trash-restore', { id: flatEntry?.id ?? '' })
+const flatBack = await get('/skills')
+check('flat-file restore', restoreFlat.status === 200 && flatBack.body.groups[0].skills.some(s => s.name === 'flat-skill' && s.kind === 'file'))
+
 // 11. Path traversal on upload is rejected.
 const evil = await post('/upload', {
   targetRoot: 'user-dsh', conflict: 'skip',

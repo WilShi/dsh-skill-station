@@ -112,6 +112,12 @@ describe('importItems', () => {
 
     const outcomes = await importItems(root, [{ sourcePath: source }], 'rename', async () => {})
     expect(outcomes[0]).toMatchObject({ name: 'dup-2', status: 'renamed' })
+    // The renamed copy must declare the new name, or the host registry sees
+    // two skills named 'dup' and operations become ambiguous.
+    const copied = await readFile(join(root.path, 'dup-2', 'SKILL.md'), 'utf8')
+    expect(copied).toContain('name: dup-2')
+    const installed = await enumerateRoot(root)
+    expect(installed.map(s => s.name).sort()).toEqual(['dup', 'dup-2'])
   })
 
   it('moves the existing skill to trash on replace', async () => {

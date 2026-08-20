@@ -9,7 +9,7 @@
 
 import { copyFile, lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { readSkillMeta } from './frontmatter.js'
+import { readSkillMeta, setName } from './frontmatter.js'
 import { assertContained, ensureRoot, enumerateRoot, type SkillRoot } from './roots.js'
 
 /** How an import resolves a name already present in the target root. */
@@ -104,7 +104,13 @@ async function importOne(
     await ensureRoot(root)
     await copyTree(item.sourcePath, targetDir)
     // Verify the copy carries a readable SKILL.md before declaring success.
-    await readFile(join(targetDir, 'SKILL.md'), 'utf8')
+    const copiedSkill = join(targetDir, 'SKILL.md')
+    await readFile(copiedSkill, 'utf8')
+    if (status === 'renamed') {
+      // The folder rename alone leaves a duplicate frontmatter name that
+      // shadows the original in the host registry; rewrite it to match.
+      await writeFile(copiedSkill, setName(await readFile(copiedSkill, 'utf8'), name), 'utf8')
+    }
     taken.add(name)
     return { sourcePath: item.sourcePath, name, status, targetPath: targetDir }
   } catch (error) {
