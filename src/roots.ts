@@ -116,7 +116,7 @@ export function assertSafeRelative(rel: string): string {
     throw new Error(`unsafe relative path: ${JSON.stringify(rel)}`)
   }
   const segments = rel.split('/')
-  if (segments.length > 8) throw new Error(`path too deep: ${rel}`)
+  if (segments.length > 16) throw new Error(`path too deep: ${rel}`)
   for (const segment of segments) {
     if (segment === '' || segment === '.' || segment === '..') {
       throw new Error(`unsafe path segment in: ${rel}`)

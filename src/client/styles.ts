@@ -4,8 +4,9 @@
  */
 
 const css = `
-.ss_drawer{position:fixed;top:0;bottom:0;left:0;width:440px;max-width:92vw;z-index:9990;display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-1);border-right:1px solid var(--dsw-alias-border-l2);box-shadow:8px 0 24px rgba(0,0,0,.14)}
-.ss_drawerHead{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--dsw-alias-border-l2)}
+.ss_overlay{position:fixed;inset:0;z-index:9990;background:var(--dsw-alias-bg-mask-2);display:flex;align-items:center;justify-content:center}
+.ss_panel{width:760px;max-width:92vw;height:min(780px,88vh);display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:14px;box-shadow:0 18px 48px rgba(0,0,0,.22);overflow:hidden}
+.ss_panelHead{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--dsw-alias-border-l2)}
 .ss_title{font-weight:600;font-size:14px;color:var(--dsw-alias-label-primary);flex:1}
 .ss_version{font-size:11px;color:var(--dsw-alias-label-tertiary)}
 .ss_iconBtn{cursor:pointer;border:none;background:transparent;color:var(--dsw-alias-label-secondary);border-radius:6px;padding:4px;display:inline-flex;align-items:center;justify-content:center}

@@ -135,8 +135,10 @@ export async function installUpload(
   moveToTrash: (path: string, name: string, rootId: string) => Promise<void>,
 ): Promise<ImportOutcome> {
   try {
-    if (files.length === 0) throw new Error('no files uploaded')
-    const stripped = stripCommonPrefix(files)
+    // Dropped folders on macOS always carry .DS_Store; never install it.
+    const usable = files.filter(file => file.path.split('/').pop() !== '.DS_Store')
+    if (usable.length === 0) throw new Error('no files uploaded')
+    const stripped = stripCommonPrefix(usable)
     const skillEntry = stripped.find(file => file.path === 'SKILL.md')
     if (skillEntry === undefined) throw new Error('the dropped folder has no SKILL.md at its top level')
     let totalBytes = 0
@@ -199,7 +201,7 @@ export async function copyTree(source: string, target: string): Promise<void> {
   await mkdir(target, { recursive: true })
   let total = 0
   const walk = async (from: string, to: string, depth: number): Promise<void> => {
-    if (depth > 8) throw new Error('skill folder too deep')
+    if (depth > 16) throw new Error('skill folder too deep')
     const entries = await readdir(from, { withFileTypes: true })
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue

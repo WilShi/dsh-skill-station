@@ -49,18 +49,20 @@ function StationFooterButton(props: { wide?: boolean }): JSX.Element {
   }, [open])
 
   const drawer = open ? (
-    <div className="ss_drawer" role="dialog" aria-label="技能站">
-      <div className="ss_drawerHead">
-        <StationIcon size={18} />
-        <span className="ss_title">技能站</span>
-        <span className="ss_version">dsh-skill-station 0.1.0</span>
-        <button className="ss_iconBtn" type="button" onClick={() => setOpen(false)} aria-label="关闭">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
-        </button>
+    <div className="ss_overlay" onClick={() => setOpen(false)}>
+      <div className="ss_panel" role="dialog" aria-label="技能站" onClick={e => e.stopPropagation()}>
+        <div className="ss_panelHead">
+          <StationIcon size={18} />
+          <span className="ss_title">技能站</span>
+          <span className="ss_version">dsh-skill-station 0.1.0</span>
+          <button className="ss_iconBtn" type="button" onClick={() => setOpen(false)} aria-label="关闭">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+        <StationApp />
       </div>
-      <StationApp />
     </div>
   ) : null
 

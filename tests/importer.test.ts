@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile, readFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { copyTree, freshName, importItems, isSkillName, stripCommonPrefix } from '../src/importer.ts'
+import { copyTree, freshName, importItems, installUpload, isSkillName, stripCommonPrefix } from '../src/importer.ts'
 import { enumerateRoot, writableRoots, type SkillRoot } from '../src/roots.ts'
 
 let dir: string
@@ -135,6 +135,25 @@ describe('importItems', () => {
     })
     expect(outcomes[0]?.status).toBe('replaced')
     expect(trashed).toEqual([join(root.path, 'dup')])
+  })
+})
+
+describe('installUpload', () => {
+  it('never installs .DS_Store cruft from dropped folders', async () => {
+    const root = makeRoot(join(dir, 'target'))
+    const b64 = (text: string) => Buffer.from(text).toString('base64')
+    const outcome = await installUpload(root, [
+      { path: 'dropped/.DS_Store', contentBase64: b64('junk') },
+      { path: 'dropped/SKILL.md', contentBase64: b64(skillMd('dropped')) },
+      { path: 'dropped/assets/.DS_Store', contentBase64: b64('junk') },
+      { path: 'dropped/assets/a.txt', contentBase64: b64('a') },
+    ], 'skip', async () => {})
+    expect(outcome.status).toBe('imported')
+    const installed = await enumerateRoot(root)
+    expect(installed.map(s => s.name)).toEqual(['dropped'])
+    await expect(readFile(join(root.path, 'dropped', '.DS_Store'), 'utf8')).rejects.toThrow()
+    await expect(readFile(join(root.path, 'dropped', 'assets', '.DS_Store'), 'utf8')).rejects.toThrow()
+    expect((await readFile(join(root.path, 'dropped', 'assets', 'a.txt'), 'utf8'))).toBe('a')
   })
 })
 

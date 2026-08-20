@@ -139,7 +139,11 @@ export function makeApiHandler(ctx: Context, config: StationConfig) {
             if (typeof raw !== 'object' || raw === null) return sendJson(res, 400, { error: 'malformed file entry' })
             const entry = raw as Record<string, unknown>
             if (typeof entry.path !== 'string' || typeof entry.contentBase64 !== 'string') return sendJson(res, 400, { error: 'malformed file entry' })
-            files.push({ path: assertSafeRelative(entry.path), contentBase64: entry.contentBase64 })
+            try {
+              files.push({ path: assertSafeRelative(entry.path), contentBase64: entry.contentBase64 })
+            } catch (error) {
+              return sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
+            }
           }
           const outcome = await installUpload(root, files, toConflict(body.conflict), (p, name, rootId) => moveToTrash(p, name, rootId).then(() => {}))
           return sendJson(res, outcome.status === 'skipped' && outcome.error !== undefined ? 409 : 200, { outcome })

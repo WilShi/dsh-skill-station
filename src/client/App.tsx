@@ -61,7 +61,6 @@ export function StationApp(props: { embedded?: boolean }): JSX.Element {
         {tab === 'install' ? <InstallTab workspace={wsParam} /> : null}
         {tab === 'trash' ? <TrashTab /> : null}
       </div>
-      {props.embedded === true ? null : null}
     </div>
   )
 }
@@ -309,7 +308,11 @@ function InstallTab(props: { workspace: string }): JSX.Element {
     void uploadFiles({ files, targetRoot, conflict, ...(props.workspace !== '' ? { workspace: props.workspace } : {}) })
       .then(r => {
         setOutcome(r.body.outcome ?? null)
-        if (!r.ok && r.body.outcome?.error === undefined) setError(`安装失败（HTTP ${String(r.status)}）`)
+        // 400/500 的响应体是 {error}；409 是 {outcome:{error}} — 优先显示服务端原文。
+        const serverError = (r.body as { error?: string }).error
+        if (!r.ok && r.body.outcome?.error === undefined) {
+          setError(serverError !== undefined ? `安装失败：${serverError}` : `安装失败（HTTP ${String(r.status)}）`)
+        }
       })
       .catch(e => setError(String(e)))
       .finally(() => { setBusy(false); setPending(null) })
@@ -455,7 +458,7 @@ function TrashTab(): JSX.Element {
 async function collectEntries(entries: unknown[]): Promise<{ path: string; file: File }[]> {
   const out: { path: string; file: File }[] = []
   const walk = async (entry: unknown, prefix: string, depth: number): Promise<void> => {
-    if (depth > 8 || out.length > 2000) return
+    if (depth > 16 || out.length > 2000) return
     const node = entry as { isFile?: boolean; isDirectory?: boolean; name: string; file?: (ok: (f: File) => void, err: (e: unknown) => void) => void; createReader?: () => { readEntries: (ok: (batch: unknown[]) => void, err: (e: unknown) => void) => void } }
     if (node.isFile === true) {
       const file = await new Promise<File>((resolve, reject) => {
