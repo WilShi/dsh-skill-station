@@ -1,0 +1,19 @@
+# Ready-to-submit entry for awesome-dsh-plugin (https://github.com/awesome-dsh-plugin/awesome-dsh-plugin).
+#
+# Submit after BOTH hold:
+#   1. This repo is >= 1 day old with >= 10 commits (checked by their CI).
+#   2. dsh-skill-station is published on npm (so the catalog maps the npm
+#      tarball; the registry validates package.json `repository` against this repo).
+#
+# Steps:
+#   git clone https://github.com/awesome-dsh-plugin/awesome-dsh-plugin
+#   copy this file to data/plugins/WilShi__dsh-skill-station.yml (strip this header comment)
+#   cd awesome-dsh-plugin && npm ci && node scripts/generate-readme.mjs
+#   open a PR with the YAML + regenerated README.md/README.zh.md
+
+url: https://github.com/WilShi/dsh-skill-station
+name: WilShi/dsh-skill-station
+category: skill
+description:
+  en: 'Sidebar skill hub: scan Claude/Codex/Cursor/Gemini skill directories, one-click import, global/project skill management with toggle and trash, drag-and-drop folder install.'
+  zh: 侧边栏技能站：扫描 Claude/Codex/Cursor/Gemini 技能目录一键导入，管理全局与项目技能（启停、回收站），拖拽文件夹即装。
