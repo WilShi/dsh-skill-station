@@ -4,7 +4,8 @@
  * the shell slots. Both mount the same StationApp.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { StationApp } from './App.tsx'
 import { injectStyles } from './styles.ts'
 
@@ -36,27 +37,41 @@ function StationIcon(props: { size?: number }): JSX.Element {
  * @param props - owner share from the sidebar shell. */
 function StationFooterButton(props: { wide?: boolean }): JSX.Element {
   const [open, setOpen] = useState(false)
+
+  // Close on Escape while the drawer is open.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
+  const drawer = open ? (
+    <div className="ss_drawer" role="dialog" aria-label="技能站">
+      <div className="ss_drawerHead">
+        <StationIcon size={18} />
+        <span className="ss_title">技能站</span>
+        <span className="ss_version">dsh-skill-station 0.1.0</span>
+        <button className="ss_iconBtn" type="button" onClick={() => setOpen(false)} aria-label="关闭">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+      <StationApp />
+    </div>
+  ) : null
+
   return (
     <>
       <button className="ss_footBtn" type="button" onClick={() => setOpen(value => !value)} title="技能站">
         <StationIcon />
         {props.wide === false ? null : <span>技能站</span>}
       </button>
-      {open ? (
-        <div className="ss_drawer" role="dialog" aria-label="技能站">
-          <div className="ss_drawerHead">
-            <StationIcon size={18} />
-            <span className="ss_title">技能站</span>
-            <span className="ss_version">dsh-skill-station 0.1.0</span>
-            <button className="ss_iconBtn" type="button" onClick={() => setOpen(false)} aria-label="关闭">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
-            </button>
-          </div>
-          <StationApp />
-        </div>
-      ) : null}
+      {/* Portal to body so no transformed/overflow ancestor clips the fixed drawer. */}
+      {drawer !== null && typeof document !== 'undefined' ? createPortal(drawer, document.body) : null}
     </>
   )
 }
