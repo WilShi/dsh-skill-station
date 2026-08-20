@@ -16,7 +16,7 @@ Restart `dsh web`. The station appears as a 技能站 button above Settings in t
 
 - **Skill library** — every skill in the writable roots, grouped: global `~/.dsh/skills`, shared `~/.agents/skills`, and per-workspace `<project>/.dsh/skills` / `.agents/skills`. Search, enable/disable (rewrites the `disable-model-invocation` frontmatter flag), delete into a restorable trash.
 - **External import** — read-only scan of `~/.claude/skills`, `~/.codex/skills`, `~/.cursor/skills`, `~/.gemini/antigravity/skills` and `~/.gemini/skills`, plus each selected workspace's `.claude|.codex|.cursor|.gemini/skills`. Pick candidates, choose a target root, import with a conflict policy (skip / rename / replace — replaced skills go to the trash). Skills appear in the session catalog without a restart.
-- **Drag-and-drop install** — drop a skill folder (or several) onto the install tab, or pick folders. Files are validated (SKILL.md with kebab-case `name` and `description`) and previewed before anything is written.
+- **Drag-and-drop install** — drop a skill folder (or several) or a `.zip` archive onto the install tab, or pick them. Zip archives are decompressed server-side, which also carries large skills with vendored dependency trees. Files are validated (SKILL.md with kebab-case `name` and `description`) and previewed before anything is written.
 - **Trash** — deletions move to `~/.dsh/skill-station/trash` with an origin manifest; restore or empty from the panel.
 
 ## Security model

@@ -95,7 +95,7 @@ provider 制分层注册表,rank 去重,`skills/change` 事件通知目录失效
 
 - **拖目录**:HTML5 拖放 + `DataTransferItem.webkitGetAsEntry()` 递归读取(Chromium/Electron 均支持),文件内容经 JSON 分块上传;服务端先收到完整文件集再校验、再落盘(原子性:校验不过不写)。
 - **选择文件夹**: `<input type="file" webkitdirectory>` 全浏览器兜底。
-- **zip**:v1.1 再做(引入解压依赖)。
+- **zip**:拖入/选择单个 `.zip` 走 `/upload-zip`,服务端解压(unzipper)后复用同一套校验与落盘管线;适合带 vendored 依赖树的大型技能。
 - 校验:必须存在 `SKILL.md` 或可推断的单一 md;frontmatter name/description 合法;name 冲突时弹出与导入相同的冲突策略。
 - 落盘前预览:显示将写入的目标路径与文件清单,用户确认后才写。
 
@@ -116,6 +116,7 @@ provider 制分层注册表,rank 去重,`skills/change` 事件通知目录失效
 | POST | `/scan` | 扫描外部 agent 目录,返回候选与冲突状态 |
 | POST | `/import` | `{ items: [{path, rename?}], target, conflict }` 复制导入 |
 | POST | `/upload` | 拖拽/选取的文件集,校验后写入目标根 |
+| POST | `/upload-zip` | 单个 zip 包(base64),服务端解压后走同一管线 |
 | POST | `/skills/:name/toggle` | 改写 frontmatter 启停 |
 | DELETE | `/skills/:name` | 移入回收站 |
 | GET | `/trash` / POST | `/trash/:id/restore` / DELETE `/trash` | 回收站管理 |

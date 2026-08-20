@@ -6,6 +6,7 @@
  */
 
 import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -118,6 +119,14 @@ const deep = await post('/upload', {
 })
 check('vendored deep-path upload', deep.status === 200 && deep.body.outcome?.status === 'imported', JSON.stringify(deep.body))
 await post('/delete', { rootId: 'user-dsh', name: 'vendored-skill' })
+
+// 10d. Zip uploads decompress server-side through the same safeguards.
+const zipB64 = readFileSync(new URL('../tests/fixtures/zip-skill.zip.b64', import.meta.url), 'utf8').trim()
+const zipUp = await post('/upload-zip', { targetRoot: 'user-dsh', conflict: 'skip', zipBase64: zipB64 })
+check('POST /upload-zip', zipUp.status === 200 && zipUp.body.outcome?.name === 'zip-skill', JSON.stringify(zipUp.body))
+await post('/delete', { rootId: 'user-dsh', name: 'zip-skill' })
+const badZip = await post('/upload-zip', { targetRoot: 'user-dsh', conflict: 'skip', zipBase64: Buffer.from('nope').toString('base64') })
+check('invalid zip rejected', badZip.status === 400, `HTTP ${String(badZip.status)}`)
 
 // 11. Path traversal on upload is rejected.
 const evil = await post('/upload', {

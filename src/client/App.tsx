@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   deleteSkill, emptyTrash, fetchRoots, fetchSkills, fetchTrash, importSkills,
-  restoreTrash, scanSources, toggleSkill, uploadFiles,
+  restoreTrash, scanSources, toggleSkill, uploadFiles, uploadZip,
   type ImportOutcome, type ScanCandidate, type SkillGroup, type SourceScan, type TrashEntry, type WorkspaceRow,
 } from './api.ts'
 
@@ -289,31 +289,42 @@ function ImportTab(props: { workspace: string }): JSX.Element {
   )
 }
 
+/** One confirmed install payload: a file list from a folder drop/pick, or one zip archive. */
+type PendingInstall =
+  | { kind: 'files'; source: string; files: { path: string; contentBase64: string }[] }
+  | { kind: 'zip'; source: string; name: string; sizeBytes: number; zipBase64: string }
+
 /** Drag-and-drop install tab.
  * @param props - the workspace scope for project targets. */
 function InstallTab(props: { workspace: string }): JSX.Element {
   const [targetRoot, setTargetRoot] = useState('user-dsh')
   const [conflict, setConflict] = useState('skip')
-  const [pending, setPending] = useState<{ path: string; contentBase64: string }[] | null>(null)
-  const [pendingSource, setPendingSource] = useState('')
+  const [pending, setPending] = useState<PendingInstall | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [outcome, setOutcome] = useState<ImportOutcome | null>(null)
   const [over, setOver] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const zipInputRef = useRef<HTMLInputElement | null>(null)
 
-  const submit = (files: { path: string; contentBase64: string }[]): void => {
+  /** Shared result handling for both install channels; surfaces the server's own message. */
+  const handleResult = (r: { ok: boolean; status: number; body: { outcome?: ImportOutcome } }): void => {
+    setOutcome(r.body.outcome ?? null)
+    const serverError = (r.body as { error?: string }).error
+    if (!r.ok && r.body.outcome?.error === undefined) {
+      setError(serverError !== undefined ? `安装失败：${serverError}` : `安装失败（HTTP ${String(r.status)}）`)
+    }
+  }
+
+  const submit = (install: PendingInstall): void => {
     setBusy(true)
     setError('')
-    void uploadFiles({ files, targetRoot, conflict, ...(props.workspace !== '' ? { workspace: props.workspace } : {}) })
-      .then(r => {
-        setOutcome(r.body.outcome ?? null)
-        // 400/500 的响应体是 {error}；409 是 {outcome:{error}} — 优先显示服务端原文。
-        const serverError = (r.body as { error?: string }).error
-        if (!r.ok && r.body.outcome?.error === undefined) {
-          setError(serverError !== undefined ? `安装失败：${serverError}` : `安装失败（HTTP ${String(r.status)}）`)
-        }
-      })
+    const scope = props.workspace !== '' ? { workspace: props.workspace } : {}
+    const request = install.kind === 'zip'
+      ? uploadZip({ zipBase64: install.zipBase64, targetRoot, conflict, ...scope })
+      : uploadFiles({ files: install.files, targetRoot, conflict, ...scope })
+    void request
+      .then(handleResult)
       .catch(e => setError(String(e)))
       .finally(() => { setBusy(false); setPending(null) })
   }
@@ -328,7 +339,14 @@ function InstallTab(props: { workspace: string }): JSX.Element {
       .map(item => (item as unknown as { webkitGetAsEntry?: () => unknown }).webkitGetAsEntry?.())
       .filter((entry): entry is NonNullable<typeof entry> => entry !== null && entry !== undefined)
     if (entries.length === 0) {
-      setError('浏览器未提供文件内容：请改用下方「选择文件夹」按钮。')
+      setError('浏览器未提供文件内容：请改用下方按钮选择文件夹或 ZIP 包。')
+      return
+    }
+    const single = entries.length === 1 ? entries[0] as { isFile?: boolean; name?: string } : undefined
+    if (single?.isFile === true && single.name?.toLowerCase().endsWith('.zip') === true) {
+      void zipEntryToPayload(single)
+        .then(zip => setPending({ kind: 'zip', source: '拖拽', ...zip }))
+        .catch(e => setError(String(e)))
       return
     }
     void collectEntries(entries).then(async files => {
@@ -336,8 +354,7 @@ function InstallTab(props: { workspace: string }): JSX.Element {
         setError('拖入的内容里没有文件。')
         return
       }
-      setPending(await dropFilesToPayloads(files))
-      setPendingSource('拖拽')
+      setPending({ kind: 'files', source: '拖拽', files: await dropFilesToPayloads(files) })
     }).catch(e => setError(String(e)))
   }
 
@@ -347,9 +364,24 @@ function InstallTab(props: { workspace: string }): JSX.Element {
     const files = Array.from(event.target.files ?? [])
     if (files.length === 0) return
     void Promise.all(files.map(fileToPayload)).then(payloads => {
-      setPending(payloads)
-      setPendingSource('文件夹选择')
+      setPending({ kind: 'files', source: '文件夹选择', files: payloads })
     }).catch(e => setError(String(e)))
+    event.target.value = ''
+  }
+
+  const onPickZip = (event: React.ChangeEvent<HTMLInputElement>): void => {
+    setError('')
+    setOutcome(null)
+    const file = event.target.files?.[0]
+    if (file === undefined) return
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+      setError('请选择 .zip 格式的压缩包。')
+      event.target.value = ''
+      return
+    }
+    void zipFileToPayload(file)
+      .then(zip => setPending({ kind: 'zip', source: 'ZIP 选择', ...zip }))
+      .catch(e => setError(String(e)))
     event.target.value = ''
   }
 
@@ -362,14 +394,21 @@ function InstallTab(props: { workspace: string }): JSX.Element {
         onDrop={onDrop}
       >
         <div style={{ fontSize: 26 }} aria-hidden="true">🗂️</div>
-        <div>把 skill 文件夹拖到这里</div>
-        <div className="ss_meta">需包含 SKILL.md；也可选择多个技能文件夹一起导入</div>
-        <button className="ss_btn" onClick={() => inputRef.current?.click()}>选择文件夹…</button>
+        <div>把 skill 文件夹或 .zip 压缩包拖到这里</div>
+        <div className="ss_meta">需包含 SKILL.md；带 vendored 依赖的大型技能建议打包成 zip（更稳更快）</div>
+        <div className="ss_actions" style={{ justifyContent: 'center' }}>
+          <button className="ss_btn" onClick={() => inputRef.current?.click()}>选择文件夹…</button>
+          <button className="ss_btn" onClick={() => zipInputRef.current?.click()}>选择 ZIP 包…</button>
+        </div>
         {/* webkitdirectory is non-standard; the cast keeps TS happy. */}
         <input
           ref={inputRef} type="file" multiple style={{ display: 'none' }}
           {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
           onChange={onPick}
+        />
+        <input
+          ref={zipInputRef} type="file" accept=".zip,application/zip" style={{ display: 'none' }}
+          onChange={onPickZip}
         />
       </div>
       <TargetSelector workspace={props.workspace} targetRoot={targetRoot} conflict={conflict} onTarget={setTargetRoot} onConflict={setConflict} />
@@ -384,9 +423,19 @@ function InstallTab(props: { workspace: string }): JSX.Element {
       {pending !== null ? (
         <div className="ss_dialog" onClick={() => setPending(null)}>
           <div className="ss_dialogBox" onClick={e => e.stopPropagation()}>
-            <div className="ss_dialogTitle">确认安装（{pendingSource}，{String(pending.length)} 个文件）</div>
-            <div className="ss_pre">{pending.slice(0, 50).map(file => file.path).join('\n')}{pending.length > 50 ? `\n… 其余 ${String(pending.length - 50)} 个文件` : ''}</div>
-            <div className="ss_meta">技能名取自 SKILL.md frontmatter 的 name 字段；安装前请确认来源可信。</div>
+            {pending.kind === 'zip' ? (
+              <>
+                <div className="ss_dialogTitle">确认安装（{pending.source}，ZIP 包）</div>
+                <div className="ss_pre">{pending.name}{'\n'}{fmtSize(pending.sizeBytes)}</div>
+                <div className="ss_meta">服务端将解压并校验其中的 SKILL.md；安装前请确认来源可信。</div>
+              </>
+            ) : (
+              <>
+                <div className="ss_dialogTitle">确认安装（{pending.source}，{String(pending.files.length)} 个文件）</div>
+                <div className="ss_pre">{pending.files.slice(0, 50).map(file => file.path).join('\n')}{pending.files.length > 50 ? `\n… 其余 ${String(pending.files.length - 50)} 个文件` : ''}</div>
+                <div className="ss_meta">技能名取自 SKILL.md frontmatter 的 name 字段；安装前请确认来源可信。</div>
+              </>
+            )}
             <div className="ss_actions" style={{ justifyContent: 'flex-end' }}>
               <button className="ss_btn" onClick={() => setPending(null)} disabled={busy}>取消</button>
               <button className="ss_btn primary" onClick={() => submit(pending)} disabled={busy}>{busy ? '安装中…' : '确认安装'}</button>
@@ -450,6 +499,24 @@ function TrashTab(): JSX.Element {
         ))}
     </>
   )
+}
+
+/** Read one dropped .zip entry into an install payload.
+ * @param entry - the single dropped FileSystemFileEntry-like node.
+ * @returns archive name, size, and base64 content. */
+async function zipEntryToPayload(entry: unknown): Promise<{ name: string; sizeBytes: number; zipBase64: string }> {
+  const node = entry as { name?: string; file?: (ok: (f: File) => void, err: (e: unknown) => void) => void }
+  const read = node.file
+  if (read === undefined) throw new Error('unsupported drop entry')
+  const file = await new Promise<File>((resolve, reject) => read.call(node, resolve, reject))
+  return zipFileToPayload(file)
+}
+
+/** Encode one picked .zip File into an install payload.
+ * @param file - the picked archive.
+ * @returns archive name, size, and base64 content. */
+async function zipFileToPayload(file: File): Promise<{ name: string; sizeBytes: number; zipBase64: string }> {
+  return { name: file.name, sizeBytes: file.size, zipBase64: bytesToBase64(new Uint8Array(await file.arrayBuffer())) }
 }
 
 /** Walk dropped FileSystemEntries into flat relative-path file lists.

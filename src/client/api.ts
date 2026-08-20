@@ -92,6 +92,12 @@ export const importSkills = (body: { items: { sourcePath: string; rename?: strin
 export const uploadFiles = (body: { files: { path: string; contentBase64: string }[]; targetRoot: string; workspace?: string; conflict: string }):
   Promise<{ ok: boolean; status: number; body: { outcome: ImportOutcome } }> => call('/upload', { method: 'POST', body })
 
+/** Install one dropped/picked zip archive (server decompresses).
+ * @param body - base64 archive, target root, and conflict policy.
+ * @returns the single outcome. */
+export const uploadZip = (body: { zipBase64: string; targetRoot: string; workspace?: string; conflict: string }):
+  Promise<{ ok: boolean; status: number; body: { outcome: ImportOutcome } }> => call('/upload-zip', { method: 'POST', body })
+
 /** Toggle one skill's invocation flags.
  * @param body - skill identity and the flag to rewrite.
  * @returns whether the rewrite succeeded. */

@@ -13,6 +13,7 @@ import { importItems, installUpload, type ConflictPolicy, type UploadFile } from
 import { assertSafeRelative, enumerateRoot, rootById, writableRoots, type SkillRoot } from './roots.js'
 import { DEFAULT_SOURCES, scanSources, type SourceSpec } from './scanner.js'
 import { emptyTrash, listTrash, moveToTrash, restoreTrash } from './trash.js'
+import { zipToUploadFiles } from './zip.js'
 
 /** Plugin configuration accepted from cordis.yml. */
 export interface StationConfig {
@@ -146,6 +147,22 @@ export function makeApiHandler(ctx: Context, config: StationConfig) {
             }
           }
           const outcome = await installUpload(root, files, toConflict(body.conflict), (p, name, rootId) => moveToTrash(p, name, rootId).then(() => {}))
+          return sendJson(res, outcome.status === 'skipped' && outcome.error !== undefined ? 409 : 200, { outcome })
+        }
+        if (path === '/upload-zip') {
+          const workspace = knownWorkspace(body.workspace)
+          const root = rootById(rootsFor(workspace), typeof body.targetRoot === 'string' ? body.targetRoot : '')
+          if (root === undefined) return sendJson(res, 400, { error: 'unknown target root' })
+          if (typeof body.zipBase64 !== 'string' || body.zipBase64.length === 0) {
+            return sendJson(res, 400, { error: 'zipBase64 must be a non-empty string' })
+          }
+          let zipFiles: UploadFile[]
+          try {
+            zipFiles = await zipToUploadFiles(Buffer.from(body.zipBase64, 'base64'))
+          } catch (error) {
+            return sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
+          }
+          const outcome = await installUpload(root, zipFiles, toConflict(body.conflict), (p, name, rootId) => moveToTrash(p, name, rootId).then(() => {}))
           return sendJson(res, outcome.status === 'skipped' && outcome.error !== undefined ? 409 : 200, { outcome })
         }
         if (path === '/toggle' || path === '/delete') {
