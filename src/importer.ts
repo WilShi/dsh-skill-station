@@ -7,7 +7,8 @@
  * validation leaves the target root untouched.
  */
 
-import { copyFile, lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { copyFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { readSkillMeta, setName } from './frontmatter.js'
 import { assertContained, ensureRoot, enumerateRoot, type SkillRoot } from './roots.js'
@@ -102,14 +103,23 @@ async function importOne(
       status = 'replaced'
     }
     await ensureRoot(root)
-    await copyTree(item.sourcePath, targetDir)
-    // Verify the copy carries a readable SKILL.md before declaring success.
-    const copiedSkill = join(targetDir, 'SKILL.md')
-    await readFile(copiedSkill, 'utf8')
-    if (status === 'renamed') {
-      // The folder rename alone leaves a duplicate frontmatter name that
-      // shadows the original in the host registry; rewrite it to match.
-      await writeFile(copiedSkill, setName(await readFile(copiedSkill, 'utf8'), name), 'utf8')
+    // Stage inside the root and rename into place: a mid-copy failure
+    // (unreadable source, full disk) leaves no partial skill behind.
+    const staging = assertContained(root, join(root.path, `.staging-${randomUUID()}`))
+    try {
+      await copyTree(item.sourcePath, staging)
+      // Verify the copy carries a readable SKILL.md before declaring success.
+      const copiedSkill = join(staging, 'SKILL.md')
+      await readFile(copiedSkill, 'utf8')
+      if (status === 'renamed') {
+        // The folder rename alone leaves a duplicate frontmatter name that
+        // shadows the original in the host registry; rewrite it to match.
+        await writeFile(copiedSkill, setName(await readFile(copiedSkill, 'utf8'), name), 'utf8')
+      }
+      await rename(staging, targetDir)
+    } catch (error) {
+      await rm(staging, { recursive: true, force: true }).catch(() => {})
+      throw error
     }
     taken.add(name)
     return { sourcePath: item.sourcePath, name, status, targetPath: targetDir }
@@ -163,12 +173,21 @@ export async function installUpload(
     }
     const targetDir = assertContained(root, join(root.path, name))
     await ensureRoot(root)
-    for (const file of stripped) {
-      const target = assertContained(root, join(targetDir, file.path))
-      await mkdir(dirname(target), { recursive: true })
-      const buffer = Buffer.from(file.contentBase64, 'base64')
-      if (buffer.byteLength > MAX_FILE_BYTES) throw new Error(`file too large: ${file.path}`)
-      await writeFile(target, buffer)
+    // Stage inside the root and rename into place, so a failed write
+    // leaves no partial skill behind.
+    const staging = assertContained(root, join(root.path, `.staging-${randomUUID()}`))
+    try {
+      for (const file of stripped) {
+        const target = assertContained(root, join(staging, file.path))
+        await mkdir(dirname(target), { recursive: true })
+        const buffer = Buffer.from(file.contentBase64, 'base64')
+        if (buffer.byteLength > MAX_FILE_BYTES) throw new Error(`file too large: ${file.path}`)
+        await writeFile(target, buffer)
+      }
+      await rename(staging, targetDir)
+    } catch (error) {
+      await rm(staging, { recursive: true, force: true }).catch(() => {})
+      throw error
     }
     return { sourcePath: 'upload', name, status, targetPath: targetDir }
   } catch (error) {
@@ -193,13 +212,14 @@ export function stripCommonPrefix(files: readonly UploadFile[]): UploadFile[] {
 }
 
 /**
- * Recursively copy a directory without following symlinks.
+ * Recursively copy a directory without following symlinks. No size caps:
+ * this is a disk-to-disk streaming copy of a folder the user already has;
+ * transport- and memory-bound caps live in the upload paths instead.
  * @param source - existing source directory.
  * @param target - destination directory, created when missing.
  */
 export async function copyTree(source: string, target: string): Promise<void> {
   await mkdir(target, { recursive: true })
-  let total = 0
   const walk = async (from: string, to: string): Promise<void> => {
     const entries = await readdir(from, { withFileTypes: true })
     for (const entry of entries) {
@@ -210,10 +230,6 @@ export async function copyTree(source: string, target: string): Promise<void> {
         await mkdir(toPath, { recursive: true })
         await walk(fromPath, toPath)
       } else if (entry.isFile()) {
-        const stat = await lstat(fromPath)
-        if (stat.size > MAX_FILE_BYTES) throw new Error(`file too large: ${entry.name}`)
-        total += stat.size
-        if (total > MAX_TOTAL_BYTES) throw new Error('skill folder exceeds the size cap')
         await copyFile(fromPath, toPath)
       }
     }

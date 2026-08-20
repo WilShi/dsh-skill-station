@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { readSkillMeta, setFlag, splitFrontmatter, type FlagKey } from './frontmatter.js'
 import { importItems, installUpload, type ConflictPolicy, type UploadFile } from './importer.js'
-import { assertSafeRelative, enumerateRoot, rootById, writableRoots, type SkillRoot } from './roots.js'
+import { assertSafeRelative, enumerateRoot, expandHome, rootById, writableRoots, type SkillRoot } from './roots.js'
 import { DEFAULT_SOURCES, scanSources, type SourceSpec } from './scanner.js'
 import { emptyTrash, listTrash, moveToTrash, restoreTrash } from './trash.js'
 import { zipToUploadFiles } from './zip.js'
@@ -125,7 +125,7 @@ export function makeApiHandler(ctx: Context, config: StationConfig) {
           const items = body.items
             .filter((item): item is { sourcePath: string; rename?: string } =>
               typeof item === 'object' && item !== null && typeof (item as Record<string, unknown>).sourcePath === 'string')
-            .map(item => ({ sourcePath: item.sourcePath, ...(typeof item.rename === 'string' && item.rename.length > 0 ? { rename: item.rename } : {}) }))
+            .map(item => ({ sourcePath: expandHome(item.sourcePath), ...(typeof item.rename === 'string' && item.rename.length > 0 ? { rename: item.rename } : {}) }))
           if (items.length === 0 || items.length > 200) return sendJson(res, 400, { error: 'provide between 1 and 200 items' })
           const outcomes = await importItems(root, items, conflict, (p, name, rootId) => moveToTrash(p, name, rootId).then(() => {}))
           return sendJson(res, 200, { outcomes })
@@ -200,6 +200,13 @@ export function makeApiHandler(ctx: Context, config: StationConfig) {
       res.writeHead(405, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ error: 'method not allowed' }))
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message === 'request body too large') {
+        const mb = Math.round(maxBodyBytes / 1024 / 1024)
+        return sendJson(res, 413, {
+          error: `请求体超过上传上限（${String(mb)}MB）。如果文件夹就在本机，请改用「本地路径安装」——直接读盘拷贝，没有大小限制。`
+        })
+      }
       sendJson(res, 500, { error: String(error) })
     }
   }

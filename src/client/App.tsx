@@ -306,6 +306,34 @@ function InstallTab(props: { workspace: string }): JSX.Element {
   const [over, setOver] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const zipInputRef = useRef<HTMLInputElement | null>(null)
+  const [pathInput, setPathInput] = useState('')
+
+  /** Install from a local folder path: the server copies disk-to-disk, no upload size limit. */
+  const onPathInstall = (): void => {
+    const sourcePath = pathInput.trim()
+    if (sourcePath === '') return
+    setBusy(true)
+    setError('')
+    setOutcome(null)
+    void importSkills({
+      items: [{ sourcePath }],
+      targetRoot,
+      conflict,
+      ...(props.workspace !== '' ? { workspace: props.workspace } : {}),
+    })
+      .then(r => {
+        const first = r.body.outcomes?.[0]
+        if (first !== undefined) setOutcome(first)
+        if (!r.ok) {
+          const serverError = (r.body as { error?: string }).error
+          setError(serverError !== undefined ? `安装失败：${serverError}` : `安装失败（HTTP ${String(r.status)}）`)
+        } else if (first !== undefined && first.status !== 'skipped') {
+          setPathInput('')
+        }
+      })
+      .catch(e => setError(String(e)))
+      .finally(() => setBusy(false))
+  }
 
   /** Shared result handling for both install channels; surfaces the server's own message. */
   const handleResult = (r: { ok: boolean; status: number; body: { outcome?: ImportOutcome } }): void => {
@@ -410,6 +438,17 @@ function InstallTab(props: { workspace: string }): JSX.Element {
           ref={zipInputRef} type="file" accept=".zip,application/zip" style={{ display: 'none' }}
           onChange={onPickZip}
         />
+      </div>
+      <div className="ss_row">
+        <input
+          className="ss_select"
+          style={{ flex: 1 }}
+          placeholder="或粘贴本机 skill 文件夹的绝对路径（磁盘直拷，不限大小）"
+          value={pathInput}
+          onChange={e => setPathInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') onPathInstall() }}
+        />
+        <button className="ss_btn" onClick={onPathInstall} disabled={busy || pathInput.trim() === ''}>路径安装</button>
       </div>
       <TargetSelector workspace={props.workspace} targetRoot={targetRoot} conflict={conflict} onTarget={setTargetRoot} onConflict={setConflict} />
       {error !== '' ? <div className="ss_err">{error}</div> : null}

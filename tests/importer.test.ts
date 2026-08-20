@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile, readFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readdir, rm, symlink, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -135,6 +135,36 @@ describe('importItems', () => {
     })
     expect(outcomes[0]?.status).toBe('replaced')
     expect(trashed).toEqual([join(root.path, 'dup')])
+  })
+})
+
+describe('install atomicity', () => {
+  it('a failed import leaves no partial skill or staging residue', async () => {
+    const source = join(dir, 'src', 'fragile')
+    await mkdir(join(source, 'locked'), { recursive: true })
+    await writeFile(join(source, 'SKILL.md'), skillMd('fragile'))
+    await chmod(join(source, 'locked'), 0o000)
+    const root = makeRoot(join(dir, 'target'))
+
+    const outcomes = await importItems(root, [{ sourcePath: source }], 'skip', async () => {})
+    expect(outcomes[0]?.status).toBe('skipped')
+    // The root must not contain the half-copied skill or a staging dir.
+    const residue = await readdir(root.path).catch(() => [] as string[])
+    expect(residue).toEqual([])
+    await chmod(join(source, 'locked'), 0o755)
+  })
+
+  it('a failed upload leaves no partial skill or staging residue', async () => {
+    const root = makeRoot(join(dir, 'target'))
+    const b64 = (text: string) => Buffer.from(text).toString('base64')
+    // 'SKILL.md/x.txt' forces a mkdir over the just-written SKILL.md file.
+    const outcome = await installUpload(root, [
+      { path: 'SKILL.md', contentBase64: b64(skillMd('broken-up')) },
+      { path: 'SKILL.md/x.txt', contentBase64: b64('x') },
+    ], 'skip', async () => {})
+    expect(outcome.status).toBe('skipped')
+    const residue = await readdir(root.path).catch(() => [] as string[])
+    expect(residue).toEqual([])
   })
 })
 
