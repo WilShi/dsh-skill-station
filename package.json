@@ -10,7 +10,7 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/index.js",
+    "lib/",
     "client/client.js",
     "cordis.patch.yml",
     "README.md",
