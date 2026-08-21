@@ -6,10 +6,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  deleteSkill, emptyTrash, exportUrl, fetchDiagnoses, fetchRoots, fetchSkillDetail, fetchSkillFile,
-  fetchSkills, fetchTrash, importSkills, repairSkill, restoreTrash, scanSources, scaffoldSkill, toggleSkill,
-  uploadFiles, uploadZip,
-  type Diagnosis, type FileView, type ImportOutcome, type ScanCandidate, type SkillDetail, type SkillGroup,
+  assignScene, deleteSkill, emptyTrash, exportUrl, fetchDiagnoses, fetchRoots, fetchScenes, fetchSkillDetail, fetchSkillFile,
+  fetchSkills, fetchTrash, importSkills, qualify, repairSkill, restoreTrash, scanSources, scaffoldSkill, toggleSkill, unassignScene,
+  saveSkillFile, uploadFiles, uploadZip,
+  type Diagnosis, type FileView, type ImportOutcome, type ScanCandidate, type SceneMap, type SkillDetail, type SkillGroup,
   type SourceScan, type TrashEntry, type WorkspaceRow,
 } from './api.ts'
 
@@ -101,6 +101,9 @@ function TargetSelector(props: {
 function LibraryTab(props: { workspace: string }): JSX.Element {
   const [groups, setGroups] = useState<SkillGroup[]>([])
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([])
+  const [scenes, setScenes] = useState<SceneMap>({})
+  const [activeScene, setActiveScene] = useState('')
+  const [tagEditor, setTagEditor] = useState<{ rootId: string; name: string } | null>(null)
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -113,6 +116,7 @@ function LibraryTab(props: { workspace: string }): JSX.Element {
       else setError(`加载失败（HTTP ${String(r.status)}）`)
     }).catch(e => setError(String(e)))
     void fetchDiagnoses(props.workspace).then(r => { if (r.ok) setDiagnoses(r.body.diagnoses ?? []) }).catch(() => {})
+    void fetchScenes().then(r => { if (r.ok) setScenes(r.body.scenes ?? {}) }).catch(() => {})
   }, [props.workspace])
 
   useEffect(() => { load() }, [load])
@@ -137,12 +141,26 @@ function LibraryTab(props: { workspace: string }): JSX.Element {
   const filtered = useMemo(() => groups.map(group => ({
     ...group,
     skills: group.skills.filter(skill =>
-      query === '' || skill.name.includes(query) || (skill.meta?.description ?? '').toLowerCase().includes(query.toLowerCase())),
-  })), [groups, query])
+      (activeScene === '' || (scenes[activeScene] ?? []).includes(qualify(group.rootId, skill.name)))
+      && (query === '' || skill.name.includes(query) || (skill.meta?.description ?? '').toLowerCase().includes(query.toLowerCase()))),
+  })), [groups, query, scenes, activeScene])
 
   return (
     <>
       <input className="ss_search" placeholder="搜索技能名称或描述" value={query} onChange={e => setQuery(e.target.value)} />
+      {Object.keys(scenes).length > 0 ? (
+        <div className="ss_row" style={{ flexWrap: 'wrap', gap: 4 }}>
+          <button className="ss_badge info" style={{ cursor: 'pointer', border: 'none', background: activeScene === '' ? 'var(--dsw-alias-state-business-primary)' : undefined, color: activeScene === '' ? 'var(--dsw-alias-bg-layer-1)' : undefined }} onClick={() => setActiveScene('')}>全部</button>
+          {Object.entries(scenes).map(([scene, ids]) => (
+            <button
+              key={scene}
+              className="ss_badge info"
+              style={{ cursor: 'pointer', border: 'none', background: activeScene === scene ? 'var(--dsw-alias-state-business-primary)' : undefined, color: activeScene === scene ? 'var(--dsw-alias-bg-layer-1)' : undefined }}
+              onClick={() => setActiveScene(current => current === scene ? '' : scene)}
+            >{scene}（{String(ids.length)}）</button>
+          ))}
+        </div>
+      ) : null}
       <div className="ss_row" style={{ justifyContent: 'space-between' }}>
         <span className="ss_meta">启用开关控制模型能否调用该技能；删除会移入回收站。</span>
         <div className="ss_actions">
@@ -201,6 +219,7 @@ function LibraryTab(props: { workspace: string }): JSX.Element {
                     ><span className="ss_switchThumb" /></button>
                     <span className="ss_meta">{enabled ? '已启用' : '已停用'}</span>
                     <span style={{ flex: 1 }} />
+                    <button className="ss_btn" onClick={() => setTagEditor({ rootId: group.rootId, name: skill.name })}>标签</button>
                     <button className="ss_btn" onClick={() => setDetail({ rootId: group.rootId, name: skill.name })}>详情</button>
                     <button className="ss_btn" onClick={() => { window.open(exportUrl(group.rootId, skill.name, props.workspace), '_blank') }}>导出</button>
                     <button className="ss_btn danger" disabled={busy === `${group.rootId}/${skill.name}`} onClick={() => onDelete(group.rootId, skill.name)}>删除</button>
@@ -216,6 +235,7 @@ function LibraryTab(props: { workspace: string }): JSX.Element {
           name={detail.name}
           workspace={props.workspace}
           onClose={() => setDetail(null)}
+          onChanged={load}
         />
       ) : null}
       {wizard ? (
@@ -223,6 +243,16 @@ function LibraryTab(props: { workspace: string }): JSX.Element {
           workspace={props.workspace}
           onClose={() => setWizard(false)}
           onCreated={() => { setWizard(false); load() }}
+        />
+      ) : null}
+      {tagEditor !== null ? (
+        <TagEditorModal
+          rootId={tagEditor.rootId}
+          name={tagEditor.name}
+          workspace={props.workspace}
+          scenes={scenes}
+          onScenes={setScenes}
+          onClose={() => setTagEditor(null)}
         />
       ) : null}
     </>
@@ -591,12 +621,15 @@ function TrashTab(): JSX.Element {
 }
 
 
-/** Detail modal: SKILL.md body plus a browsable file list.
- * @param props - skill identity, workspace scope, and close callback. */
-function SkillDetailModal(props: { rootId: string; name: string; workspace: string; onClose: () => void }): JSX.Element {
+/** Detail modal: SKILL.md body plus a browsable file list, with in-place editing.
+ * @param props - skill identity, workspace scope, close callback, and post-save refresh callback. */
+function SkillDetailModal(props: { rootId: string; name: string; workspace: string; onClose: () => void; onChanged: () => void }): JSX.Element {
   const [detail, setDetail] = useState<SkillDetail | null>(null)
   const [view, setView] = useState<FileView | null>(null)
   const [error, setError] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saveState, setSaveState] = useState<'' | 'saving' | 'saved'>('')
 
   useEffect(() => {
     void fetchSkillDetail(props.rootId, props.name, props.workspace)
@@ -611,7 +644,34 @@ function SkillDetailModal(props: { rootId: string; name: string; workspace: stri
   }
 
   const shown = view !== null ? view.content : (detail?.content ?? '')
-  const shownPath = view !== null ? view.path : 'SKILL.md'
+  /** Relative path of the file currently shown (SKILL.md or a tree entry). */
+  const currentPath = view !== null ? view.path : (detail?.kind === 'file' ? (detail.path.split('/').pop() ?? 'SKILL.md') : 'SKILL.md')
+  const shownPath = currentPath + (view?.truncated === true ? '（已截断，仅显示前 512KB）' : '')
+
+  const startEdit = (): void => {
+    setDraft(shown)
+    setEditing(true)
+    setSaveState('')
+  }
+
+  const save = (): void => {
+    setSaveState('saving')
+    setError('')
+    void saveSkillFile({ rootId: props.rootId, name: props.name, path: currentPath, content: draft, workspace: props.workspace })
+      .then(r => {
+        if (r.ok) {
+          setSaveState('saved')
+          setEditing(false)
+          if (view !== null) setView({ ...view, content: draft })
+          if (detail !== null && currentPath === 'SKILL.md') setDetail({ ...detail, content: draft })
+          props.onChanged()
+        } else {
+          setSaveState('')
+          setError(`保存失败：${String((r.body as { error?: string }).error ?? r.status)}`)
+        }
+      })
+      .catch(e => { setSaveState(''); setError(String(e)) })
+  }
 
   return (
     <div className="ss_dialog" onClick={props.onClose}>
@@ -624,22 +684,110 @@ function SkillDetailModal(props: { rootId: string; name: string; workspace: stri
         {error !== '' ? <div className="ss_err">{error}</div> : null}
         {detail !== null && detail.files.length > 0 ? (
           <div className="ss_row" style={{ flexWrap: 'wrap', gap: 4 }}>
-            <button className="ss_btn" onClick={() => setView(null)}>SKILL.md</button>
+            <button className="ss_btn" onClick={() => { setView(null); setEditing(false) }}>SKILL.md</button>
             {detail.files.filter(f => f !== 'SKILL.md').slice(0, 30).map(f => (
-              <button key={f} className="ss_btn" onClick={() => openFile(f)}>{f}</button>
+              <button key={f} className="ss_btn" onClick={() => { openFile(f); setEditing(false) }}>{f}</button>
             ))}
           </div>
         ) : null}
-        <div className="ss_meta">{shownPath}{view?.truncated === true ? '（已截断，仅显示前 512KB）' : ''}</div>
-        <div className="ss_pre" style={{ maxHeight: 380, overflow: 'auto' }}>{shown}</div>
+        <div className="ss_meta">{shownPath}{saveState === 'saved' ? ' · 已保存' : ''}</div>
+        {editing ? (
+          <textarea
+            className="ss_pre"
+            style={{ maxHeight: 380, minHeight: 240, overflow: 'auto', width: '100%', resize: 'vertical' }}
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+          />
+        ) : (
+          <div className="ss_pre" style={{ maxHeight: 380, overflow: 'auto' }}>{shown}</div>
+        )}
         <div className="ss_actions" style={{ justifyContent: 'flex-end' }}>
-          <button className="ss_btn" onClick={props.onClose}>关闭</button>
+          {editing ? (
+            <>
+              <button className="ss_btn" onClick={() => setEditing(false)} disabled={saveState === 'saving'}>取消</button>
+              <button className="ss_btn primary" onClick={save} disabled={saveState === 'saving'}>{saveState === 'saving' ? '保存中…' : '保存'}</button>
+            </>
+          ) : (
+            <>
+              <button className="ss_btn" onClick={startEdit} disabled={detail === null || (view?.truncated === true)}>编辑</button>
+              <button className="ss_btn" onClick={props.onClose}>关闭</button>
+            </>
+          )}
         </div>
       </div>
     </div>
   )
 }
 
+/** Scene tag editor: checkboxes over existing scenes plus a new-scene input.
+ * @param props - skill identity, workspace scope, scene map, map setter, close callback. */
+function TagEditorModal(props: {
+  rootId: string
+  name: string
+  workspace: string
+  scenes: SceneMap
+  onScenes: (map: SceneMap) => void
+  onClose: () => void
+}): JSX.Element {
+  const [newScene, setNewScene] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const skillId = qualify(props.rootId, props.name)
+
+  const toggle = (scene: string, assigned: boolean): void => {
+    setBusy(true)
+    setError('')
+    const scope = props.workspace !== '' ? { workspace: props.workspace } : {}
+    const request = assigned
+      ? unassignScene({ scene, rootId: props.rootId, name: props.name, ...scope })
+      : assignScene({ scene, rootId: props.rootId, name: props.name, ...scope })
+    void request
+      .then(r => {
+        if (r.ok) props.onScenes(r.body.scenes ?? {})
+        else setError(String((r.body as { error?: string }).error ?? `操作失败（HTTP ${String(r.status)}）`))
+      })
+      .catch(e => setError(String(e)))
+      .finally(() => setBusy(false))
+  }
+
+  const addScene = (): void => {
+    const scene = newScene.trim()
+    if (scene === '') return
+    setNewScene('')
+    toggle(scene, false)
+  }
+
+  return (
+    <div className="ss_dialog" onClick={props.onClose}>
+      <div className="ss_dialogBox" onClick={e => e.stopPropagation()}>
+        <div className="ss_dialogTitle">「{props.name}」的场景标签</div>
+        {Object.keys(props.scenes).length === 0 ? <div className="ss_meta">还没有场景，先在下方创建一个。</div> : null}
+        {Object.entries(props.scenes).map(([scene, ids]) => (
+          <label key={scene} className="ss_row" style={{ cursor: 'pointer' }}>
+            <input type="checkbox" checked={ids.includes(skillId)} disabled={busy} onChange={() => toggle(scene, ids.includes(skillId))} />
+            <span>{scene}</span>
+            <span className="ss_meta">{String(ids.length)} 个技能</span>
+          </label>
+        ))}
+        <div className="ss_row">
+          <input
+            className="ss_select"
+            style={{ flex: 1 }}
+            placeholder="新场景名（如：写作、工程、摸鱼）"
+            value={newScene}
+            onChange={e => setNewScene(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') addScene() }}
+          />
+          <button className="ss_btn" onClick={addScene} disabled={busy || newScene.trim() === ''}>创建并加入</button>
+        </div>
+        {error !== '' ? <div className="ss_err">{error}</div> : null}
+        <div className="ss_actions" style={{ justifyContent: 'flex-end' }}>
+          <button className="ss_btn primary" onClick={props.onClose}>完成</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 /** New-skill wizard: name + description + optional body into a writable root.
  * @param props - workspace scope, close callback, and created callback. */
 function WizardModal(props: { workspace: string; onClose: () => void; onCreated: () => void }): JSX.Element {

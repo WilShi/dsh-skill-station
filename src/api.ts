@@ -14,6 +14,7 @@ import { readSkillMeta, repairFrontmatter, setFlag, splitFrontmatter, type FlagK
 import { importItems, installUpload, isSkillName, type ConflictPolicy, type UploadFile } from './importer.js'
 import { assertSafeRelative, ensureRoot, enumerateRoot, expandHome, rootById, writableRoots, type DiskSkill, type SkillRoot } from './roots.js'
 import { DEFAULT_SOURCES, scanSources, type SourceSpec } from './scanner.js'
+import { assignScene, qualify, readScenes, unassignScene, type QualifiedSkill } from './scenes.js'
 import { emptyTrash, listTrash, moveToTrash, restoreTrash } from './trash.js'
 import { zipToUploadFiles } from './zip.js'
 
@@ -103,6 +104,9 @@ export function makeApiHandler(ctx: Context, config: StationConfig) {
         }
         if (path === '/trash') {
           return sendJson(res, 200, { entries: await listTrash() })
+        }
+        if (path === '/scenes') {
+          return sendJson(res, 200, { scenes: await readScenes() })
         }
         if (path === '/diagnose') {
           const workspace = knownWorkspace(url.searchParams.get('workspace') ?? undefined)
@@ -229,6 +233,43 @@ export function makeApiHandler(ctx: Context, config: StationConfig) {
         if (path === '/trash-restore') {
           const error = await restoreTrash(typeof body.id === 'string' ? body.id : '')
           return error === null ? sendJson(res, 200, { restored: true }) : sendJson(res, 409, { error })
+        }
+        if (path === '/scenes/assign' || path === '/scenes/unassign') {
+          const workspace = knownWorkspace(body.workspace)
+          const scene = typeof body.scene === 'string' ? body.scene : ''
+          const rootId = typeof body.rootId === 'string' ? body.rootId : ''
+          const name = typeof body.name === 'string' ? body.name : ''
+          const found = await findSkill(rootsFor(workspace), rootId, name)
+          if (found === undefined) return sendJson(res, 404, { error: 'skill not found' })
+          const skillId: QualifiedSkill = qualify(rootId, name)
+          try {
+            const scenes = path === '/scenes/assign' ? await assignScene(scene, skillId) : await unassignScene(scene, skillId)
+            return sendJson(res, 200, { scenes })
+          } catch (error) {
+            return sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
+          }
+        }
+        if (path === '/save-file') {
+          const workspace = knownWorkspace(body.workspace)
+          const found = await findSkill(rootsFor(workspace), typeof body.rootId === 'string' ? body.rootId : '', typeof body.name === 'string' ? body.name : '')
+          if (found === undefined) return sendJson(res, 404, { error: 'skill not found' })
+          const rel = typeof body.path === 'string' ? body.path : ''
+          if (typeof body.content !== 'string') return sendJson(res, 400, { error: 'content must be a string' })
+          const SAVE_CAP = 2 * 1024 * 1024
+          if (Buffer.byteLength(body.content, 'utf8') > SAVE_CAP) return sendJson(res, 400, { error: 'content exceeds the 2MB edit cap' })
+          const base = found.kind === 'file' ? dirname(found.path) : found.path
+          const target = resolve(base, rel)
+          if (target !== resolve(base) && !target.startsWith(`${resolve(base)}/`)) {
+            return sendJson(res, 400, { error: 'path escapes the skill directory' })
+          }
+          const stat = await lstat(target).catch(() => null)
+          if (stat === null || !stat.isFile()) return sendJson(res, 404, { error: 'file not found' })
+          await writeFile(target, body.content, 'utf8')
+          // SKILL.md edits may change name/flags; report the fresh meta.
+          const meta = target === resolve(found.kind === 'file' ? found.path : join(found.path, 'SKILL.md'))
+            ? readSkillMeta(body.content)
+            : null
+          return sendJson(res, 200, { saved: rel, meta })
         }
         if (path === '/repair') {
           const workspace = knownWorkspace(body.workspace)

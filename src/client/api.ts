@@ -165,6 +165,37 @@ export const exportUrl = (rootId: string, name: string, workspace: string): stri
 export const scaffoldSkill = (body: { targetRoot: string; name: string; description: string; body?: string; workspace?: string }): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> =>
   call('/scaffold', { method: 'POST', body })
 
+
+/** scene name → qualified skill ids (`rootId::name`). */
+export type SceneMap = Record<string, string[]>
+
+/** Build one qualified skill id.
+ * @param rootId - owning root. @param name - skill name.
+ * @returns the qualified id. */
+export const qualify = (rootId: string, name: string): string => `${rootId}::${name}`
+
+/** Fetch scene assignments. @returns the scene map. */
+export const fetchScenes = (): Promise<{ ok: boolean; status: number; body: { scenes: SceneMap } }> =>
+  call('/scenes')
+
+/** Assign one skill to a scene.
+ * @param body - scene name and skill identity.
+ * @returns the updated scene map. */
+export const assignScene = (body: { scene: string; rootId: string; name: string; workspace?: string }): Promise<{ ok: boolean; status: number; body: { scenes: SceneMap } }> =>
+  call('/scenes/assign', { method: 'POST', body })
+
+/** Remove one skill from a scene.
+ * @param body - scene name and skill identity.
+ * @returns the updated scene map. */
+export const unassignScene = (body: { scene: string; rootId: string; name: string; workspace?: string }): Promise<{ ok: boolean; status: number; body: { scenes: SceneMap } }> =>
+  call('/scenes/unassign', { method: 'POST', body })
+
+/** Save one edited file inside a skill directory.
+ * @param body - skill identity, relative path, and new UTF-8 content.
+ * @returns save result with fresh meta for SKILL.md writes. */
+export const saveSkillFile = (body: { rootId: string; name: string; path: string; content: string; workspace?: string }): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> =>
+  call('/save-file', { method: 'POST', body })
+
 /** Empty the trash permanently. @returns completion result. */
 export const emptyTrash = (): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> =>
   call('/trash-empty', { method: 'POST', body: {} })

@@ -149,6 +149,21 @@ check('GET /file views skill content', fileView.status === 200 && String(fileVie
 const zipResp = await fetch(`${base}/export?root=user-dsh&name=made-skill`)
 const zipMagic = Buffer.from(await zipResp.arrayBuffer()).subarray(0, 2).toString('latin1')
 check('GET /export downloads a zip', zipResp.status === 200 && zipMagic === 'PK')
+// 10h. Scene assignment round trip.
+const assign = await post('/scenes/assign', { scene: '工程', rootId: 'user-dsh', name: 'made-skill' })
+check('POST /scenes/assign', assign.status === 200 && (assign.body.scenes?.['工程'] ?? []).includes('user-dsh::made-skill'))
+const scenesRead = await get('/scenes')
+check('GET /scenes persists', scenesRead.status === 200 && (scenesRead.body.scenes?.['工程'] ?? []).includes('user-dsh::made-skill'))
+const unassign = await post('/scenes/unassign', { scene: '工程', rootId: 'user-dsh', name: 'made-skill' })
+check('POST /scenes/unassign drops empty scene', unassign.status === 200 && unassign.body.scenes?.['工程'] === undefined)
+
+// 10i. In-place file editing.
+const edited = '---\nname: made-skill\ndescription: edited inline\n---\nnew body\n'
+const save = await post('/save-file', { rootId: 'user-dsh', name: 'made-skill', path: 'SKILL.md', content: edited })
+check('POST /save-file saves and returns fresh meta', save.status === 200 && save.body.meta?.description === 'edited inline', JSON.stringify(save.body))
+const escape = await post('/save-file', { rootId: 'user-dsh', name: 'made-skill', path: '../escape.md', content: 'x' })
+check('save-file path escape rejected', escape.status === 400, `HTTP ${String(escape.status)}`)
+
 await post('/delete', { rootId: 'user-dsh', name: 'made-skill' })
 await post('/delete', { rootId: 'user-dsh', name: 'sloppy' })
 
