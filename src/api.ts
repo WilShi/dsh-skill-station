@@ -5,12 +5,14 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { readFile, readdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { lstat, readFile, readdir, writeFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { readSkillMeta, setFlag, splitFrontmatter, type FlagKey } from './frontmatter.js'
-import { importItems, installUpload, type ConflictPolicy, type UploadFile } from './importer.js'
-import { assertSafeRelative, enumerateRoot, expandHome, rootById, writableRoots, type SkillRoot } from './roots.js'
+import { diagnoseRoot } from './diagnose.js'
+import { skillToZip } from './export.js'
+import { readSkillMeta, repairFrontmatter, setFlag, splitFrontmatter, type FlagKey } from './frontmatter.js'
+import { importItems, installUpload, isSkillName, type ConflictPolicy, type UploadFile } from './importer.js'
+import { assertSafeRelative, ensureRoot, enumerateRoot, expandHome, rootById, writableRoots, type DiskSkill, type SkillRoot } from './roots.js'
 import { DEFAULT_SOURCES, scanSources, type SourceSpec } from './scanner.js'
 import { emptyTrash, listTrash, moveToTrash, restoreTrash } from './trash.js'
 import { zipToUploadFiles } from './zip.js'
@@ -102,6 +104,42 @@ export function makeApiHandler(ctx: Context, config: StationConfig) {
         if (path === '/trash') {
           return sendJson(res, 200, { entries: await listTrash() })
         }
+        if (path === '/diagnose') {
+          const workspace = knownWorkspace(url.searchParams.get('workspace') ?? undefined)
+          const diagnoses = (await Promise.all(rootsFor(workspace).map(diagnoseRoot))).flat()
+          return sendJson(res, 200, { diagnoses })
+        }
+        if (path === '/file') {
+          const workspace = knownWorkspace(url.searchParams.get('workspace') ?? undefined)
+          const found = await findSkill(rootsFor(workspace), url.searchParams.get('root') ?? '', url.searchParams.get('name') ?? '')
+          if (found === undefined) return sendJson(res, 404, { error: 'skill not found' })
+          const rel = url.searchParams.get('path') ?? ''
+          const base = found.kind === 'file' ? dirname(found.path) : found.path
+          const target = resolve(base, rel)
+          if (target !== resolve(base) && !target.startsWith(`${resolve(base)}/`)) {
+            return sendJson(res, 400, { error: 'path escapes the skill directory' })
+          }
+          const stat = await lstat(target).catch(() => null)
+          if (stat === null || !stat.isFile()) return sendJson(res, 404, { error: 'file not found' })
+          const VIEW_CAP = 512 * 1024
+          const content = await readFile(target)
+          const truncated = content.byteLength > VIEW_CAP
+          const body = content.subarray(0, VIEW_CAP).toString('utf8')
+          return sendJson(res, 200, { path: rel, content: body, truncated, bytes: stat.size })
+        }
+        if (path === '/export') {
+          const workspace = knownWorkspace(url.searchParams.get('workspace') ?? undefined)
+          const found = await findSkill(rootsFor(workspace), url.searchParams.get('root') ?? '', url.searchParams.get('name') ?? '')
+          if (found === undefined) return sendJson(res, 404, { error: 'skill not found' })
+          const archive = await skillToZip(found)
+          res.writeHead(200, {
+            'content-type': 'application/zip',
+            'content-disposition': `attachment; filename="${found.name}.zip"`,
+            'content-length': archive.byteLength,
+          })
+          res.end(archive)
+          return
+        }
         res.writeHead(404, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ error: 'not found' }))
         return
@@ -192,6 +230,35 @@ export function makeApiHandler(ctx: Context, config: StationConfig) {
           const error = await restoreTrash(typeof body.id === 'string' ? body.id : '')
           return error === null ? sendJson(res, 200, { restored: true }) : sendJson(res, 409, { error })
         }
+        if (path === '/repair') {
+          const workspace = knownWorkspace(body.workspace)
+          const found = await findSkill(rootsFor(workspace), typeof body.rootId === 'string' ? body.rootId : '', typeof body.name === 'string' ? body.name : '')
+          if (found === undefined) return sendJson(res, 404, { error: 'skill not found' })
+          const file = found.kind === 'file' ? found.path : join(found.path, 'SKILL.md')
+          const repaired = repairFrontmatter(await readFile(file, 'utf8'))
+          if (repaired === null) return sendJson(res, 409, { error: '该技能的 frontmatter 无法自动修复' })
+          await writeFile(file, repaired, 'utf8')
+          return sendJson(res, 200, { repaired: found.name })
+        }
+        if (path === '/scaffold') {
+          const workspace = knownWorkspace(body.workspace)
+          const root = rootById(rootsFor(workspace), typeof body.targetRoot === 'string' ? body.targetRoot : '')
+          if (root === undefined) return sendJson(res, 400, { error: 'unknown target root' })
+          const name = typeof body.name === 'string' ? body.name.trim() : ''
+          if (!isSkillName(name)) return sendJson(res, 400, { error: `name "${name}" 不是合法的 kebab-case 技能名` })
+          const description = typeof body.description === 'string' ? body.description.trim() : ''
+          if (description === '') return sendJson(res, 400, { error: 'description 不能为空' })
+          const taken = new Set((await enumerateRoot(root)).map(skill => skill.name))
+          if (taken.has(name)) return sendJson(res, 409, { error: `技能 \"${name}\" 已存在` })
+          const bodyText = typeof body.body === 'string' && body.body.trim() !== '' ? body.body : '# 用法\n\n在这里编写技能的详细说明。\n'
+          await ensureRoot(root)
+          const dir = join(root.path, name)
+          const { mkdir } = await import('node:fs/promises')
+          await mkdir(dir, { recursive: true })
+          const skillMd = `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\n${bodyText}\n`
+          await writeFile(join(dir, 'SKILL.md'), skillMd, 'utf8')
+          return sendJson(res, 200, { created: name, path: dir })
+        }
         if (path === '/trash-empty') {
           await emptyTrash()
           return sendJson(res, 200, { emptied: true })
@@ -229,6 +296,13 @@ export function flagForToggle(body: Record<string, unknown>): { key: FlagKey; va
 
 function toConflict(value: unknown): ConflictPolicy {
   return value === 'rename' || value === 'replace' ? value : 'skip'
+}
+
+/** Resolve one disk skill by root id and name. */
+async function findSkill(roots: SkillRoot[], rootId: string, name: string): Promise<DiskSkill | undefined> {
+  const root = rootById(roots, rootId)
+  if (root === undefined) return undefined
+  return (await enumerateRoot(root)).find(skill => skill.name === name)
 }
 
 async function skillDetail(path: string, kind: 'directory' | 'file'): Promise<Record<string, unknown>> {

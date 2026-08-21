@@ -119,6 +119,52 @@ export const fetchTrash = (): Promise<{ ok: boolean; status: number; body: { ent
 export const restoreTrash = (id: string): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> =>
   call('/trash-restore', { method: 'POST', body: { id } })
 
+
+/** One discovery diagnosis for a skill the host would ignore. */
+export interface Diagnosis { rootId: string; name: string; path: string; reason: string; detail: string }
+
+/** Fetch discovery diagnoses for one workspace scope.
+ * @param workspace - workspace path, empty for global-only.
+ * @returns diagnoses per unloadable skill. */
+export const fetchDiagnoses = (workspace: string): Promise<{ ok: boolean; status: number; body: { diagnoses: Diagnosis[] } }> =>
+  call(`/diagnose${workspace !== '' ? `?workspace=${encodeURIComponent(workspace)}` : ''}`)
+
+/** One skill detail response. */
+export interface SkillDetail { kind: 'directory' | 'file'; path: string; content: string; files: string[]; meta: { name?: string; description?: string; modelInvocable: boolean; userInvocable: boolean } | null; frontmatter: Record<string, unknown> | null }
+
+/** Fetch one skill's detail (SKILL.md content + file list).
+ * @param rootId - owning root. @param name - skill name. @param workspace - optional scope.
+ * @returns parsed detail. */
+export const fetchSkillDetail = (rootId: string, name: string, workspace: string): Promise<{ ok: boolean; status: number; body: SkillDetail }> =>
+  call(`/skill?root=${encodeURIComponent(rootId)}&name=${encodeURIComponent(name)}${workspace !== '' ? `&workspace=${encodeURIComponent(workspace)}` : ''}`)
+
+/** One viewed file's payload. */
+export interface FileView { path: string; content: string; truncated: boolean; bytes: number }
+
+/** Read one file inside a skill directory (view only).
+ * @param rootId - owning root. @param name - skill name. @param path - path relative to the skill dir. @param workspace - optional scope.
+ * @returns file content (512KB capped). */
+export const fetchSkillFile = (rootId: string, name: string, path: string, workspace: string): Promise<{ ok: boolean; status: number; body: FileView }> =>
+  call(`/file?root=${encodeURIComponent(rootId)}&name=${encodeURIComponent(name)}&path=${encodeURIComponent(path)}${workspace !== '' ? `&workspace=${encodeURIComponent(workspace)}` : ''}`)
+
+/** Repair one skill's non-strict-YAML frontmatter in place.
+ * @param body - skill identity.
+ * @returns repair result. */
+export const repairSkill = (body: { rootId: string; name: string; workspace?: string }): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> =>
+  call('/repair', { method: 'POST', body })
+
+/** Build the zip export download URL for one skill.
+ * @param rootId - owning root. @param name - skill name. @param workspace - optional scope.
+ * @returns same-origin download URL. */
+export const exportUrl = (rootId: string, name: string, workspace: string): string =>
+  `/skill-station/api/export?root=${encodeURIComponent(rootId)}&name=${encodeURIComponent(name)}${workspace !== '' ? `&workspace=${encodeURIComponent(workspace)}` : ''}`
+
+/** Scaffold a new skill.
+ * @param body - target root, name, description, and optional body markdown.
+ * @returns creation result. */
+export const scaffoldSkill = (body: { targetRoot: string; name: string; description: string; body?: string; workspace?: string }): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> =>
+  call('/scaffold', { method: 'POST', body })
+
 /** Empty the trash permanently. @returns completion result. */
 export const emptyTrash = (): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> =>
   call('/trash-empty', { method: 'POST', body: {} })

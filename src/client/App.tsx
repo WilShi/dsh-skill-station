@@ -6,9 +6,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  deleteSkill, emptyTrash, fetchRoots, fetchSkills, fetchTrash, importSkills,
-  restoreTrash, scanSources, toggleSkill, uploadFiles, uploadZip,
-  type ImportOutcome, type ScanCandidate, type SkillGroup, type SourceScan, type TrashEntry, type WorkspaceRow,
+  deleteSkill, emptyTrash, exportUrl, fetchDiagnoses, fetchRoots, fetchSkillDetail, fetchSkillFile,
+  fetchSkills, fetchTrash, importSkills, repairSkill, restoreTrash, scanSources, scaffoldSkill, toggleSkill,
+  uploadFiles, uploadZip,
+  type Diagnosis, type FileView, type ImportOutcome, type ScanCandidate, type SkillDetail, type SkillGroup,
+  type SourceScan, type TrashEntry, type WorkspaceRow,
 } from './api.ts'
 
 /** Root ids that always exist (global targets). */
@@ -98,15 +100,19 @@ function TargetSelector(props: {
  * @param props - the workspace scope to display. */
 function LibraryTab(props: { workspace: string }): JSX.Element {
   const [groups, setGroups] = useState<SkillGroup[]>([])
+  const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([])
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const [detail, setDetail] = useState<{ rootId: string; name: string } | null>(null)
+  const [wizard, setWizard] = useState(false)
 
   const load = useCallback(() => {
     void fetchSkills(props.workspace).then(r => {
       if (r.ok) setGroups(r.body.groups ?? [])
       else setError(`加载失败（HTTP ${String(r.status)}）`)
     }).catch(e => setError(String(e)))
+    void fetchDiagnoses(props.workspace).then(r => { if (r.ok) setDiagnoses(r.body.diagnoses ?? []) }).catch(() => {})
   }, [props.workspace])
 
   useEffect(() => { load() }, [load])
@@ -139,9 +145,36 @@ function LibraryTab(props: { workspace: string }): JSX.Element {
       <input className="ss_search" placeholder="搜索技能名称或描述" value={query} onChange={e => setQuery(e.target.value)} />
       <div className="ss_row" style={{ justifyContent: 'space-between' }}>
         <span className="ss_meta">启用开关控制模型能否调用该技能；删除会移入回收站。</span>
-        <button className="ss_btn" onClick={load}>刷新</button>
+        <div className="ss_actions">
+          <button className="ss_btn" onClick={() => setWizard(true)}>新建技能</button>
+          <button className="ss_btn" onClick={load}>刷新</button>
+        </div>
       </div>
       {error !== '' ? <div className="ss_err">{error}</div> : null}
+      {diagnoses.length > 0 ? (
+        <div className="ss_card">
+          <div className="ss_cardHead"><span className="ss_name">⚠️ {String(diagnoses.length)} 个技能宿主无法加载</span></div>
+          {diagnoses.map(d => (
+            <div className="ss_row" key={`${d.rootId}/${d.path}`}>
+              <span className="ss_badge warn">{d.reason}</span>
+              <span className="ss_meta" title={d.path}>{d.name} — {d.detail}</span>
+              {d.reason === 'invalid-yaml' ? (
+                <button
+                  className="ss_btn"
+                  disabled={busy === `repair:${d.rootId}/${d.name}`}
+                  onClick={() => {
+                    setBusy(`repair:${d.rootId}/${d.name}`)
+                    void repairSkill({ rootId: d.rootId, name: d.name, ...(props.workspace !== '' ? { workspace: props.workspace } : {}) })
+                      .then(r => { if (!r.ok) setError(`修复失败：${String((r.body as { error?: string }).error ?? r.status)}`) })
+                      .catch(e => setError(String(e)))
+                      .finally(() => { setBusy(''); load() })
+                  }}
+                >修复</button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
       {filtered.every(group => group.skills.length === 0)
         ? <div className="ss_empty">这里还没有技能。去「导入技能」或「拖拽安装」添加一个吧。</div>
         : filtered.map(group => group.skills.length === 0 ? null : (
@@ -168,6 +201,8 @@ function LibraryTab(props: { workspace: string }): JSX.Element {
                     ><span className="ss_switchThumb" /></button>
                     <span className="ss_meta">{enabled ? '已启用' : '已停用'}</span>
                     <span style={{ flex: 1 }} />
+                    <button className="ss_btn" onClick={() => setDetail({ rootId: group.rootId, name: skill.name })}>详情</button>
+                    <button className="ss_btn" onClick={() => { window.open(exportUrl(group.rootId, skill.name, props.workspace), '_blank') }}>导出</button>
                     <button className="ss_btn danger" disabled={busy === `${group.rootId}/${skill.name}`} onClick={() => onDelete(group.rootId, skill.name)}>删除</button>
                   </div>
                 </div>
@@ -175,6 +210,21 @@ function LibraryTab(props: { workspace: string }): JSX.Element {
             })}
           </div>
         ))}
+      {detail !== null ? (
+        <SkillDetailModal
+          rootId={detail.rootId}
+          name={detail.name}
+          workspace={props.workspace}
+          onClose={() => setDetail(null)}
+        />
+      ) : null}
+      {wizard ? (
+        <WizardModal
+          workspace={props.workspace}
+          onClose={() => setWizard(false)}
+          onCreated={() => { setWizard(false); load() }}
+        />
+      ) : null}
     </>
   )
 }
@@ -537,6 +587,117 @@ function TrashTab(): JSX.Element {
           </div>
         ))}
     </>
+  )
+}
+
+
+/** Detail modal: SKILL.md body plus a browsable file list.
+ * @param props - skill identity, workspace scope, and close callback. */
+function SkillDetailModal(props: { rootId: string; name: string; workspace: string; onClose: () => void }): JSX.Element {
+  const [detail, setDetail] = useState<SkillDetail | null>(null)
+  const [view, setView] = useState<FileView | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    void fetchSkillDetail(props.rootId, props.name, props.workspace)
+      .then(r => { if (r.ok) setDetail(r.body); else setError(`加载失败（HTTP ${String(r.status)}）`) })
+      .catch(e => setError(String(e)))
+  }, [props.rootId, props.name, props.workspace])
+
+  const openFile = (path: string): void => {
+    void fetchSkillFile(props.rootId, props.name, path, props.workspace)
+      .then(r => { if (r.ok) setView(r.body); else setError(`读取失败（HTTP ${String(r.status)}）`) })
+      .catch(e => setError(String(e)))
+  }
+
+  const shown = view !== null ? view.content : (detail?.content ?? '')
+  const shownPath = view !== null ? view.path : 'SKILL.md'
+
+  return (
+    <div className="ss_dialog" onClick={props.onClose}>
+      <div className="ss_dialogBox" style={{ maxWidth: 640 }} onClick={e => e.stopPropagation()}>
+        <div className="ss_dialogTitle">
+          {props.name}
+          {detail?.kind === 'file' ? <span className="ss_badge">单文件</span> : null}
+        </div>
+        {detail !== null ? <div className="ss_meta">{detail.path}</div> : null}
+        {error !== '' ? <div className="ss_err">{error}</div> : null}
+        {detail !== null && detail.files.length > 0 ? (
+          <div className="ss_row" style={{ flexWrap: 'wrap', gap: 4 }}>
+            <button className="ss_btn" onClick={() => setView(null)}>SKILL.md</button>
+            {detail.files.filter(f => f !== 'SKILL.md').slice(0, 30).map(f => (
+              <button key={f} className="ss_btn" onClick={() => openFile(f)}>{f}</button>
+            ))}
+          </div>
+        ) : null}
+        <div className="ss_meta">{shownPath}{view?.truncated === true ? '（已截断，仅显示前 512KB）' : ''}</div>
+        <div className="ss_pre" style={{ maxHeight: 380, overflow: 'auto' }}>{shown}</div>
+        <div className="ss_actions" style={{ justifyContent: 'flex-end' }}>
+          <button className="ss_btn" onClick={props.onClose}>关闭</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** New-skill wizard: name + description + optional body into a writable root.
+ * @param props - workspace scope, close callback, and created callback. */
+function WizardModal(props: { workspace: string; onClose: () => void; onCreated: () => void }): JSX.Element {
+  const [targetRoot, setTargetRoot] = useState('user-dsh')
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [body, setBody] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const submit = (): void => {
+    setBusy(true)
+    setError('')
+    void scaffoldSkill({
+      targetRoot,
+      name: name.trim(),
+      description: description.trim(),
+      ...(body.trim() !== '' ? { body } : {}),
+      ...(props.workspace !== '' ? { workspace: props.workspace } : {}),
+    })
+      .then(r => {
+        if (r.ok) props.onCreated()
+        else setError(String((r.body as { error?: string }).error ?? `创建失败（HTTP ${String(r.status)}）`))
+      })
+      .catch(e => setError(String(e)))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div className="ss_dialog" onClick={props.onClose}>
+      <div className="ss_dialogBox" onClick={e => e.stopPropagation()}>
+        <div className="ss_dialogTitle">新建技能</div>
+        <div className="ss_row">
+          <span className="ss_meta">目标</span>
+          <select className="ss_select" value={targetRoot} onChange={e => setTargetRoot(e.target.value)}>
+            {GLOBAL_ROOTS.map(root => <option key={root.id} value={root.id}>{root.label}</option>)}
+            {props.workspace !== '' ? [
+              <option key="project-dsh" value={`project-dsh:${props.workspace}`}>项目 .dsh/skills</option>,
+              <option key="project-agents" value={`project-agents:${props.workspace}`}>项目 .agents/skills</option>,
+            ] : null}
+          </select>
+        </div>
+        <input className="ss_search" placeholder="技能名（kebab-case，如 my-first-skill）" value={name} onChange={e => setName(e.target.value)} />
+        <input className="ss_search" placeholder="一句话描述（模型按它决定何时调用）" value={description} onChange={e => setDescription(e.target.value)} />
+        <textarea
+          className="ss_search"
+          style={{ minHeight: 120, fontFamily: 'inherit', resize: 'vertical' }}
+          placeholder="正文（可选，留空用模板）"
+          value={body}
+          onChange={e => setBody(e.target.value)}
+        />
+        {error !== '' ? <div className="ss_err">{error}</div> : null}
+        <div className="ss_actions" style={{ justifyContent: 'flex-end' }}>
+          <button className="ss_btn" onClick={props.onClose} disabled={busy}>取消</button>
+          <button className="ss_btn primary" onClick={submit} disabled={busy || name.trim() === '' || description.trim() === ''}>{busy ? '创建中…' : '创建'}</button>
+        </div>
+      </div>
+    </div>
   )
 }
 

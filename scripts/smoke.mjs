@@ -128,6 +128,30 @@ await post('/delete', { rootId: 'user-dsh', name: 'zip-skill' })
 const badZip = await post('/upload-zip', { targetRoot: 'user-dsh', conflict: 'skip', zipBase64: Buffer.from('nope').toString('base64') })
 check('invalid zip rejected', badZip.status === 400, `HTTP ${String(badZip.status)}`)
 
+// 10e. Scaffold creates a skill; duplicates are rejected.
+const made = await post('/scaffold', { targetRoot: 'user-dsh', name: 'made-skill', description: 'from the wizard' })
+check('POST /scaffold', made.status === 200 && made.body.created === 'made-skill', JSON.stringify(made.body))
+const madeDup = await post('/scaffold', { targetRoot: 'user-dsh', name: 'made-skill', description: 'again' })
+check('scaffold duplicate rejected', madeDup.status === 409, `HTTP ${String(madeDup.status)}`)
+
+// 10f. Diagnose flags a broken skill; repair fixes it in place.
+await writeFile(join(process.env.DSH_HOME, 'skills', 'sloppy.md'), '---\nname: sloppy\ndescription: 消化。keywords: 闪卡\n---\nbody\n')
+const diag = await get('/diagnose')
+const hit = (diag.body.diagnoses ?? []).find(d => d.name === 'sloppy')
+check('GET /diagnose flags invalid-yaml', diag.status === 200 && hit?.reason === 'invalid-yaml', JSON.stringify(diag.body.diagnoses))
+const rep = await post('/repair', { rootId: 'user-dsh', name: 'sloppy' })
+const diagAfter = await get('/diagnose')
+check('POST /repair clears the diagnosis', rep.status === 200 && !(diagAfter.body.diagnoses ?? []).some(d => d.name === 'sloppy'))
+
+// 10g. File view and zip export.
+const fileView = await get('/file?root=user-dsh&name=made-skill&path=SKILL.md')
+check('GET /file views skill content', fileView.status === 200 && String(fileView.body.content ?? '').includes('made-skill'))
+const zipResp = await fetch(`${base}/export?root=user-dsh&name=made-skill`)
+const zipMagic = Buffer.from(await zipResp.arrayBuffer()).subarray(0, 2).toString('latin1')
+check('GET /export downloads a zip', zipResp.status === 200 && zipMagic === 'PK')
+await post('/delete', { rootId: 'user-dsh', name: 'made-skill' })
+await post('/delete', { rootId: 'user-dsh', name: 'sloppy' })
+
 // 11. Path traversal on upload is rejected.
 const evil = await post('/upload', {
   targetRoot: 'user-dsh', conflict: 'skip',
