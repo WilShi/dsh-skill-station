@@ -1,58 +1,41 @@
-# dsh-skill-station
+# DSH Skill Station 🧩
 
-English | [中文](README.zh.md)
+> DeepSeek Harness 的技能管理站：扫描 Claude / Codex / Cursor / Gemini 的技能库，一键导入、拖拽安装、全局与项目级管理——全部在侧边栏面板里完成。
 
-A skill hub inside [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): one sidebar button opens a panel that scans the skill libraries of Claude Code, Codex CLI, Cursor, and Gemini CLI, imports skills with one click, manages global and project skills, and installs a skill folder by dragging it in.
+## 为什么做这个
 
-## Install
+Agent 技能（Skill）生态正在爆发，但各家框架的技能散落在不同目录和格式里：
 
-```sh
-dsh plugin --profile web add dsh-skill-station
+- 想给 DSH 装一个技能，要手动找、手动拷、手动配
+- Claude Code / Codex / Cursor / Gemini 各自有技能库，互不打通
+- 全局技能 vs 项目技能的边界管理混乱
+
+DSH Skill Station 把这些收敛成**一个侧边栏面板**：扫描 → 选择 → 一键导入。
+
+## 功能
+
+- 🔍 **多源扫描**：自动发现本机 Claude / Codex / Cursor / Gemini 的技能库
+- ⬇️ **一键导入**：看中的技能直接装进 DSH
+- 🗂️ **全局/项目双级管理**：用户级技能与项目级技能分开展示、独立操作
+- 🖱️ **拖拽安装**：拖进来就装好了
+- 🧱 **侧边栏面板**：不打断当前工作流
+
+## 安装
+
+```bash
+# 作为 DSH 插件安装（具体命令按你实际的安装方式补充）
+dsh plugin add dsh-skill-station
 ```
 
-Restart `dsh web`. The station appears as a 技能站 button above Settings in the sidebar, and as a settings section.
+## 技术栈
 
-## What you get
+TypeScript · DSH 插件体系（Cordis 内核）
 
-- **Skill library** — every skill in the writable roots, grouped: global `~/.dsh/skills`, shared `~/.agents/skills`, and per-workspace `<project>/.dsh/skills` / `.agents/skills`. Search and user-defined scene tags, enable/disable (rewrites the `disable-model-invocation` frontmatter flag), delete into a restorable trash.
-- **Detail, edit, export** — open any skill to browse its file tree and edit files in place (saving SKILL.md re-reads the invocation flags live), download it as a re-importable zip, and scaffold new skills from a wizard. A diagnostics pass flags every skill the host loader would ignore — strict-YAML, missing fields, legacy keys — with one-click repair for broken frontmatter.
-- **External import** — read-only scan of `~/.claude/skills`, `~/.codex/skills`, `~/.cursor/skills`, `~/.gemini/antigravity/skills` and `~/.gemini/skills`, plus each selected workspace's `.claude|.codex|.cursor|.gemini/skills`. Pick candidates, choose a target root, import with a conflict policy (skip / rename / replace — replaced skills go to the trash). Skills appear in the session catalog without a restart.
-- **Drag-and-drop install** — drop a skill folder (or several) or a `.zip` archive onto the install tab, or pick them. Zip archives are decompressed server-side, which also carries large skills with vendored dependency trees. Files are validated (SKILL.md with kebab-case `name` and `description`) and previewed before anything is written.
-- **Local path install** — paste the absolute path of a skill folder already on this machine and the server copies it disk-to-disk: no upload, no size limit. Every install is staged and renamed into place, so a failed copy never leaves a half-installed skill.
-- **Trash** — deletions move to `~/.dsh/skill-station/trash` with an origin manifest; restore or empty from the panel.
+## 路线图
 
-## Security model
-
-- Writes only ever land inside the writable skill roots listed above; every path is containment-checked after normalization, symlinks are never followed during copies, and uploads reject traversal segments.
-- Mutating HTTP endpoints reject cross-origin requests; the API is served on the same local server as the GUI.
-- External agent directories are scanned read-only; the station never modifies them.
-- Uploaded and imported skills are third-party content — review them before enabling.
-
-## Config
-
-All fields optional, under the `dsh-skill-station` plugin row in your profile patch:
-
-```yaml
-plugins:
-  dsh-skill-station:
-    maxBodyBytes: 67108864      # upload request cap (default 64 MB)
-    sources:                    # replace the default scan sources entirely
-      - id: claude
-        label: Claude Code
-        userDirs: ['~/.claude/skills']
-        projectDirs: ['.claude/skills']
-```
-
-## Development
-
-```sh
-npm install
-npm run build     # tsc server build + esbuild client bundle
-npm test          # vitest unit tests
-node scripts/smoke.mjs   # in-process API smoke (needs a prior build)
-```
-
-The client bundle is served through the shell's `window.__ModuleLoader__` and registers into the `sidebar.footer.action` and `settings.section` slots.
+- [ ] 技能版本兼容性检查（engines.dsh 声明）
+- [ ] 技能市场接入
+- [ ] 技能差异对比视图
 
 ## License
 
